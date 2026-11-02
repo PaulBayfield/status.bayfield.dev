@@ -536,8 +536,136 @@ a.sidebar-row {
 .latency-chart .dot {
   fill: var(--primary);
 }
-.latency-chart .area {
-  fill: color-mix(in srgb, var(--primary) 10%, transparent);
+.latency-chart .band {
+  fill: color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: -4px 0 6px;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.legend-item:hover {
+  background: var(--hover);
+}
+.legend-item.off {
+  opacity: 0.45;
+}
+.legend-line {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+}
+.legend-band {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* ---------- Certificates and domains ---------- */
+
+.expiry-list {
+  display: flex;
+  flex-direction: column;
+}
+.expiry-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+}
+.expiry-row + .expiry-row {
+  border-top: 1px solid var(--border);
+}
+.expiry-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--s);
+  background: color-mix(in srgb, var(--s) 12%, transparent);
+}
+.expiry-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.expiry-main strong {
+  font-weight: 600;
+}
+.expiry-days {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--s-text, var(--text));
+}
+.expiry-row.s-down .expiry-days {
+  color: var(--down-text);
+}
+.expiry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--s);
+  background: color-mix(in srgb, var(--s) 12%, transparent);
+}
+
+/* ---------- Public charts ---------- */
+
+.public-item + .public-item {
+  border-top: 1px solid var(--border);
+}
+.public-item .monitor-row {
+  border-bottom: 0;
+}
+.chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0 6px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.chart-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.public-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+.public-chart .segmented {
+  align-self: flex-end;
 }
 .latency-chart .strip.down {
   fill: var(--down);
@@ -915,8 +1043,22 @@ a.sidebar-row {
 .event-dot.e-down {
   background: var(--down);
 }
-.event-dot.e-degraded {
+.event-dot.e-degraded,
+.event-dot.e-expiring {
   background: var(--degraded);
+}
+.inline-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.form-field .inline-number .text-field {
+  width: 72px;
+  flex: none;
+}
+.inline-number {
+  white-space: nowrap;
 }
 .placeholder-chips {
   display: flex;

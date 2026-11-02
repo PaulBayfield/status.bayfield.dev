@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import { all } from "./db.ts";
 import { rateLimit } from "./http.ts";
 import { ping, type Monitor } from "./checks.ts";
-import { publicPage } from "./pages.ts";
+import { publicPage, publicSeries } from "./pages.ts";
 
 export const publicRoutes = new Hono();
 
@@ -42,6 +42,15 @@ publicRoutes.get("/pages/:slug", (c) =>
   cached(c, 60, async () => {
     const page = await publicPage((c.req.param("slug") ?? "").toLowerCase());
     return page ? c.json(page) : c.json({ error: "No status page at this address" }, 404);
+  }),
+);
+
+/** A monitor's response times on a page that shows them: /status/<slug>, opening a row. */
+publicRoutes.get("/pages/:slug/series/:id", (c) =>
+  cached(c, 60, async () => {
+    const range = c.req.query("range");
+    const series = await publicSeries((c.req.param("slug") ?? "").toLowerCase(), Number(c.req.param("id")), range === "7d" || range === "30d" ? range : "24h");
+    return series ? c.json(series) : c.json({ error: "Not found" }, 404);
   }),
 );
 

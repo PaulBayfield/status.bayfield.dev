@@ -9,7 +9,9 @@ import { requireAdmin, requireCollaborator, requireUser, signOutEverywhere, type
 import { checkNow, parseHostPort, type Monitor, type MonitorType } from "./checks.ts";
 import { EVENTS, WEBHOOK_KINDS, notify, request, send, testChange, type Webhook } from "./notify.ts";
 import { DETAILS, LANGUAGES, MESSAGE_EVENTS, PLACEHOLDERS, TemplateError, defaultTexts, parseTemplate, storedTemplate, type MessageEvent } from "./messages.ts";
-import { daysByMonitor, monitorView, uptime } from "./views.ts";
+import { daysByMonitor, expiryView, latencySeries, monitorView, uptime } from "./views.ts";
+import { certificateTarget, checkExpiries, domainTarget, expiriesOf } from "./expiry.ts";
+import { expiryChange } from "./checks.ts";
 import { updateStatus } from "./updates.ts";
 import { listPages, pageRoutes, pagesByMonitor } from "./pages.ts";
 import { isRole, meView, type User } from "./users.ts";
@@ -134,15 +136,38 @@ async function parseMonitor(b: Record<string, unknown>, old?: Monitor) {
     intervalS: int(pick("intervalS"), 60, type === "heartbeat" ? 7 * 86400 : 86400, 60),
     retries: int(pick("retries"), 1, 10, 2),
     degradedMs: int(pick("degradedMs"), 0, 60_000, 0),
+    // Certificates need an https:// target; domains a host name (not an IP or a heartbeat).
+    certCheck: type === "http" && /^https:/i.test(target) && !!pick("certCheck"),
+    domainCheck: type !== "heartbeat" && !!pick("domainCheck"),
+    domainName: domainName(pick("domainName")),
+    expiryWarnDays: int(pick("expiryWarnDays"), 1, 90, 14),
   };
 }
+
+function domainName(v: unknown): string {
+  const d = str(v, 253).toLowerCase().replace(/\.$/, "");
+  if (!d) return "";
+  if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/.test(d)) throw bad("Enter a domain like example.com");
+  return d;
+}
+
+/** After saving: check the certificate and the domain right away (or forget them when off). */
+const refreshExpiries = (c: { executionCtx: { waitUntil(p: Promise<unknown>): void } }, m: Monitor) =>
+  c.executionCtx.waitUntil(
+    checkExpiries(m)
+      .then(async (n) => {
+        if (n.length) await notify(n.map(expiryChange));
+      })
+      .catch((e) => console.error(e)),
+  );
 
 api.get("/monitors", async (c) => {
   const monitors = await all<Monitor>("SELECT * FROM monitors ORDER BY lower(name)");
   const days = await daysByMonitor(monitors.map((m) => m.id));
   const pages = await pagesByMonitor();
+  const expiries = await expiriesOf(monitors.map((m) => m.id));
   const secrets = canEdit(c.get("user"));
-  return c.json(monitors.map((m) => monitorView(m, days.get(m.id) ?? [], { secrets, pages: pages.get(m.id) })));
+  return c.json(monitors.map((m) => monitorView(m, days.get(m.id) ?? [], { secrets, pages: pages.get(m.id), expiries: expiries.get(m.id) })));
 });
 
 api.get("/monitors/:id", async (c) => {
@@ -158,7 +183,7 @@ api.get("/monitors/:id", async (c) => {
   const latency30 = lastDays(30).reduce((a, d) => ({ sum: a.sum + d.latencySum, n: a.n + d.latencyCount }), { sum: 0, n: 0 });
   const open = await first<{ id: number; startedAt: number; cause: string }>("SELECT id, started_at, cause FROM incidents WHERE monitor_id = ? AND resolved_at IS NULL", m.id);
   return c.json({
-    ...monitorView(m, days, { secrets: canEdit(c.get("user")), pages: (await pagesByMonitor()).get(m.id) }),
+    ...monitorView(m, days, { secrets: canEdit(c.get("user")), pages: (await pagesByMonitor()).get(m.id), expiries: (await expiriesOf([m.id])).get(m.id) }),
     stats: {
       uptime24h: day?.total ? (day.ok ?? 0) / day.total : null,
       uptime7d: uptime(lastDays(7)),
@@ -174,32 +199,8 @@ api.get("/monitors/:id", async (c) => {
   });
 });
 
-const RANGES: Record<string, { span: number; bucket: number }> = {
-  "24h": { span: DAY, bucket: 5 * 60_000 },
-  "7d": { span: 7 * DAY, bucket: 60 * 60_000 },
-  "30d": { span: 30 * DAY, bucket: 4 * 60 * 60_000 },
-};
-
 /** Response times over a range, in buckets: the chart on a monitor's page. */
-api.get("/monitors/:id/series", async (c) => {
-  const mid = id(c);
-  const range = RANGES[c.req.query("range") ?? "24h"] ?? RANGES["24h"];
-  const since = Math.floor((Date.now() - range.span) / range.bucket) * range.bucket;
-  const rows = await all<{ t: number; avg: number | null; max: number | null; n: number; down: number; degraded: number }>(
-    // The bucket size is inlined (it comes from RANGES): D1 binds numbers as floats, and the
-    // division must be an integer one.
-    `SELECT (at / ${range.bucket}) * ${range.bucket} AS t, avg(latency) AS avg, max(latency) AS max, count(*) AS n, sum(status = 'down') AS down, sum(status = 'degraded') AS degraded
-     FROM checks WHERE monitor_id = ? AND at >= ? GROUP BY at / ${range.bucket} ORDER BY t`,
-    mid,
-    since,
-  );
-  return c.json({
-    from: new Date(since).toISOString(),
-    to: new Date().toISOString(),
-    bucketMs: range.bucket,
-    points: rows.map((r) => ({ t: new Date(r.t).toISOString(), avg: r.avg === null ? null : Math.round(r.avg), max: r.max, n: r.n, down: r.down, degraded: r.degraded })),
-  });
-});
+api.get("/monitors/:id/series", async (c) => c.json(await latencySeries(id(c), c.req.query("range"))));
 
 api.get("/monitors/:id/checks", async (c) => {
   const mid = id(c);
@@ -217,8 +218,9 @@ api.post("/monitors", requireCollaborator, async (c) => {
   const v = await parseMonitor(await body(c));
   const now = Date.now();
   const { id: mid } = await run(
-    `INSERT INTO monitors (project_id, name, type, target, method, expected_status, keyword, headers, follow_redirects, timeout_ms, interval_s, retries, degraded_ms, push_token, next_check_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO monitors (project_id, name, type, target, method, expected_status, keyword, headers, follow_redirects, timeout_ms, interval_s, retries, degraded_ms, push_token,
+       cert_check, domain_check, domain_name, expiry_warn_days, next_check_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.projectId,
     v.name,
     v.type,
@@ -233,6 +235,10 @@ api.post("/monitors", requireCollaborator, async (c) => {
     v.retries,
     v.degradedMs,
     v.type === "heartbeat" ? randomToken(18) : null,
+    v.certCheck,
+    v.domainCheck,
+    v.domainName,
+    v.expiryWarnDays,
     // Heartbeats wait for their first ping; the others are checked straight away.
     v.type === "heartbeat" ? now + v.intervalS * 1000 : 0,
     now,
@@ -240,6 +246,7 @@ api.post("/monitors", requireCollaborator, async (c) => {
   );
   const m = await getMonitor(mid);
   if (m.type !== "heartbeat") c.executionCtx.waitUntil(checkNow(m).then((ch) => ch && notify([ch])).catch((e) => console.error(e)));
+  if (m.certCheck || m.domainCheck) refreshExpiries(c, m);
   return c.json(monitorView(m, [], { secrets: true }), 201);
 });
 
@@ -251,7 +258,7 @@ api.patch("/monitors/:id", requireCollaborator, async (c) => {
   const pushToken = v.type === "heartbeat" ? (old.pushToken ?? randomToken(18)) : null;
   await run(
     `UPDATE monitors SET project_id = ?, name = ?, type = ?, target = ?, method = ?, expected_status = ?, keyword = ?, headers = ?, follow_redirects = ?,
-       timeout_ms = ?, interval_s = ?, retries = ?, degraded_ms = ?, push_token = ?, updated_at = ?,
+       timeout_ms = ?, interval_s = ?, retries = ?, degraded_ms = ?, push_token = ?, cert_check = ?, domain_check = ?, domain_name = ?, expiry_warn_days = ?, updated_at = ?,
        status = CASE WHEN ? THEN 'pending' ELSE status END, fail_count = CASE WHEN ? THEN 0 ELSE fail_count END,
        next_check_at = CASE WHEN ? THEN 0 ELSE min(next_check_at, ?) END
      WHERE id = ?`,
@@ -269,6 +276,10 @@ api.patch("/monitors/:id", requireCollaborator, async (c) => {
     v.retries,
     v.degradedMs,
     pushToken,
+    v.certCheck,
+    v.domainCheck,
+    v.domainName,
+    v.expiryWarnDays,
     Date.now(),
     retarget,
     retarget,
@@ -278,7 +289,26 @@ api.patch("/monitors/:id", requireCollaborator, async (c) => {
   );
   if (retarget) await run("UPDATE incidents SET resolved_at = ? WHERE monitor_id = ? AND resolved_at IS NULL", Date.now(), old.id);
   const m = await getMonitor(old.id);
-  return c.json(monitorView(m, (await daysByMonitor([m.id])).get(m.id) ?? [], { secrets: true }));
+  // Anything about the certificate or domain changed: check again (or drop them).
+  if (
+    retarget ||
+    !!old.certCheck !== v.certCheck ||
+    !!old.domainCheck !== v.domainCheck ||
+    old.domainName !== v.domainName ||
+    old.expiryWarnDays !== v.expiryWarnDays
+  )
+    refreshExpiries(c, m);
+  return c.json(monitorView(m, (await daysByMonitor([m.id])).get(m.id) ?? [], { secrets: true, expiries: (await expiriesOf([m.id])).get(m.id) }));
+});
+
+/** "Check again" on the certificate and domain card. */
+api.post("/monitors/:id/expiry-check", requireCollaborator, async (c) => {
+  rateLimit(c, "expiry-check", 10, 60_000);
+  const m = await getMonitor(id(c));
+  if (!(m.certCheck && certificateTarget(m)) && !(m.domainCheck && domainTarget(m))) throw bad("This monitor doesn't watch a certificate or a domain");
+  const notices = await checkExpiries(m);
+  if (notices.length) c.executionCtx.waitUntil(notify(notices.map(expiryChange)));
+  return c.json(((await expiriesOf([m.id])).get(m.id) ?? []).map(expiryView));
 });
 
 api.post("/monitors/:id/pause", requireCollaborator, async (c) => {
@@ -512,6 +542,10 @@ api.get("/export", async (c) => {
       intervalS: m.intervalS,
       retries: m.retries,
       degradedMs: m.degradedMs,
+      certCheck: !!m.certCheck,
+      domainCheck: !!m.domainCheck,
+      domainName: m.domainName,
+      expiryWarnDays: m.expiryWarnDays,
       paused: !!m.paused,
     })),
     webhooks: webhooks.map((w) => ({ name: w.name, kind: w.kind, events: w.events, projects: w.projects, enabled: !!w.enabled, template: storedTemplate(w.template) })),

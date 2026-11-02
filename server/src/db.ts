@@ -211,6 +211,29 @@ const MIGRATIONS: string[] = [
   /* 3: what each webhook's messages say and look like (JSON, empty: the defaults) */ `
   ALTER TABLE webhooks ADD COLUMN template text NOT NULL DEFAULT '';
   `,
+  /* 4: SSL certificate and domain expiry for HTTP monitors; what status pages show */ `
+  ALTER TABLE monitors ADD COLUMN cert_check integer NOT NULL DEFAULT 0;
+  ALTER TABLE monitors ADD COLUMN domain_check integer NOT NULL DEFAULT 0;
+  -- Empty: the registered domain of the target's host.
+  ALTER TABLE monitors ADD COLUMN domain_name text NOT NULL DEFAULT '';
+  ALTER TABLE monitors ADD COLUMN expiry_warn_days integer NOT NULL DEFAULT 14;
+  CREATE TABLE expiries (
+    monitor_id integer NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    kind text NOT NULL CHECK (kind IN ('certificate', 'domain')),
+    name text NOT NULL DEFAULT '',
+    expires_at integer,
+    issued_at integer,
+    issuer text NOT NULL DEFAULT '',
+    source text NOT NULL DEFAULT '',
+    error text NOT NULL DEFAULT '',
+    checked_at integer NOT NULL,
+    -- The last warning sent: warn, urgent, expired.
+    stage text NOT NULL DEFAULT '',
+    PRIMARY KEY (monitor_id, kind)
+  );
+  -- JSON: uptime bars, tiles, incidents, response time charts. Empty: the defaults.
+  ALTER TABLE status_pages ADD COLUMN display text NOT NULL DEFAULT '';
+  `,
 ];
 
 let migrated: Promise<void> | null = null;

@@ -4,6 +4,7 @@
 import { all } from "./db.ts";
 import { config } from "./config.ts";
 import type { Monitor } from "./checks.ts";
+import type { Expiry } from "./expiry.ts";
 
 export const HISTORY_DAYS = 90;
 
@@ -49,7 +50,18 @@ export function uptime(days: Pick<Day, "total" | "up" | "degraded">[]): number |
 /** [day, checks, down, degraded] for each day with checks: the bars, compactly. */
 const history = (days: Day[]) => days.map((d) => [d.day, d.total, d.down, d.degraded] as const);
 
-export function monitorView(m: Monitor, days: Day[], opts: { secrets: boolean; pages?: { id: number; slug: string; title: string }[] }) {
+export const expiryView = (e: Expiry) => ({
+  kind: e.kind,
+  name: e.name,
+  expiresAt: iso(e.expiresAt),
+  issuedAt: iso(e.issuedAt),
+  issuer: e.issuer,
+  source: e.source,
+  error: e.error,
+  checkedAt: iso(e.checkedAt),
+});
+
+export function monitorView(m: Monitor, days: Day[], opts: { secrets: boolean; pages?: { id: number; slug: string; title: string }[]; expiries?: Expiry[] }) {
   return {
     id: m.id,
     projectId: m.projectId,
@@ -69,6 +81,11 @@ export function monitorView(m: Monitor, days: Day[], opts: { secrets: boolean; p
     lastPingAt: iso(m.lastPingAt),
     // The status pages that show it.
     pages: opts.pages ?? [],
+    certCheck: !!m.certCheck,
+    domainCheck: !!m.domainCheck,
+    domainName: m.domainName,
+    expiryWarnDays: m.expiryWarnDays,
+    expiries: (opts.expiries ?? []).map(expiryView),
     paused: !!m.paused,
     status: m.paused ? ("paused" as const) : m.status,
     lastCheckedAt: iso(m.lastCheckedAt),
@@ -91,5 +108,33 @@ export function publicMonitorView(m: Monitor, days: Day[]) {
     statusSince: iso(m.statusSince),
     uptime90: uptime(days),
     history: history(days),
+  };
+}
+
+const DAY_MS = 24 * 60 * 60_000;
+export const RANGES: Record<string, { span: number; bucket: number }> = {
+  "24h": { span: DAY_MS, bucket: 5 * 60_000 },
+  "7d": { span: 7 * DAY_MS, bucket: 60 * 60_000 },
+  "30d": { span: 30 * DAY_MS, bucket: 4 * 60 * 60_000 },
+};
+
+/** Response times over a range, in buckets (min, mean and max of each): the charts. */
+export async function latencySeries(monitorId: number, rangeKey: string | undefined) {
+  const range = RANGES[rangeKey ?? "24h"] ?? RANGES["24h"];
+  const since = Math.floor((Date.now() - range.span) / range.bucket) * range.bucket;
+  const rows = await all<{ t: number; avg: number | null; min: number | null; max: number | null; n: number; down: number; degraded: number }>(
+    // The bucket size is inlined (it comes from RANGES): D1 binds numbers as floats, and the
+    // division must be an integer one.
+    `SELECT (at / ${range.bucket}) * ${range.bucket} AS t, avg(latency) AS avg, min(latency) AS min, max(latency) AS max, count(*) AS n,
+       sum(status = 'down') AS down, sum(status = 'degraded') AS degraded
+     FROM checks WHERE monitor_id = ? AND at >= ? GROUP BY at / ${range.bucket} ORDER BY t`,
+    monitorId,
+    since,
+  );
+  return {
+    from: new Date(since).toISOString(),
+    to: new Date().toISOString(),
+    bucketMs: range.bucket,
+    points: rows.map((r) => ({ t: new Date(r.t).toISOString(), avg: r.avg === null ? null : Math.round(r.avg), min: r.min, max: r.max, n: r.n, down: r.down, degraded: r.degraded })),
   };
 }

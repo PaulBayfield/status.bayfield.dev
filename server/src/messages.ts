@@ -11,8 +11,8 @@ import { all } from "./db.ts";
 import { config } from "./config.ts";
 import type { Change } from "./notify.ts";
 
-export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded"] as const;
-/** down, back up (after down), back to normal (after degraded), degraded. */
+export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring"] as const;
+/** down, back up (after down), back to normal (after degraded), degraded, a certificate or domain expiring. */
 export type MessageEvent = (typeof MESSAGE_EVENTS)[number];
 export const LANGUAGES = ["en", "fr"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -47,8 +47,11 @@ const TEXTS = {
       up: { title: "{monitor} is back up", body: "Down for {duration}." },
       normal: { title: "{monitor} is back to normal", body: "Response times are back to normal." },
       degraded: { title: "{monitor} is slow", body: "{cause}" },
+      expiring: { title: "The {what} of {monitor} {expiry}", body: "{name} · until {expires} · {issuer}" },
     },
     labels: { target: "Target", cause: "Cause", latency: "Response time", duration: "Downtime", project: "Project", time: "Time" },
+    what: { certificate: "SSL certificate", domain: "domain" },
+    expiry: { future: "expires in {n} days", tomorrow: "expires tomorrow", today: "expires today", past: "expired {n} days ago", yesterday: "expired yesterday" },
     buttons: { monitor: "Open in Status", statusPage: "Status page" },
     footer: "Status · {time}",
     status: { up: "Up", down: "Down", degraded: "Degraded", pending: "Pending" },
@@ -61,8 +64,11 @@ const TEXTS = {
       up: { title: "{monitor} est de nouveau en ligne", body: "Hors service pendant {duration}." },
       normal: { title: "{monitor} fonctionne de nouveau normalement", body: "Les temps de réponse sont revenus à la normale." },
       degraded: { title: "{monitor} est lent", body: "{cause}" },
+      expiring: { title: "Le {what} de {monitor} {expiry}", body: "{name} · jusqu'au {expires} · {issuer}" },
     },
     labels: { target: "Cible", cause: "Cause", latency: "Temps de réponse", duration: "Durée de la panne", project: "Projet", time: "Heure" },
+    what: { certificate: "certificat SSL", domain: "nom de domaine" },
+    expiry: { future: "expire dans {n} jours", tomorrow: "expire demain", today: "expire aujourd'hui", past: "a expiré il y a {n} jours", yesterday: "a expiré hier" },
     buttons: { monitor: "Ouvrir dans Status", statusPage: "Page de statut" },
     footer: "Status · {time}",
     status: { up: "En ligne", down: "Hors service", degraded: "Dégradé", pending: "En attente" },
@@ -71,7 +77,28 @@ const TEXTS = {
   },
 } as const;
 
-export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page"] as const;
+export const PLACEHOLDERS = [
+  "monitor",
+  "project",
+  "target",
+  "status",
+  "previous",
+  "cause",
+  "code",
+  "latency",
+  "duration",
+  "time",
+  "year",
+  "link",
+  "page",
+  // Certificate and domain warnings:
+  "what",
+  "name",
+  "expires",
+  "days",
+  "expiry",
+  "issuer",
+] as const;
 
 /** The default texts of each language, for the editor's placeholders. */
 export function defaultTexts() {
@@ -84,7 +111,7 @@ export function emptyTemplate(language: Language = "en"): Template {
   const blank = { title: "", body: "" };
   return {
     language,
-    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank } },
+    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
     buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
@@ -94,7 +121,7 @@ export function emptyTemplate(language: Language = "en"): Template {
       footer: "",
       emoji: true,
       colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524" },
-      mentions: { down: "", up: "", normal: "", degraded: "" },
+      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "" },
     },
   };
 }
@@ -169,9 +196,12 @@ export function storedTemplate(json: string): Template {
 // --- Rendering ---
 
 export const messageEvent = (c: Change): MessageEvent =>
-  c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : c.from === "degraded" ? "normal" : "up";
+  c.expiry ? "expiring" : c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : c.from === "degraded" ? "normal" : "up";
 
-const EMOJI: Record<MessageEvent, string> = { down: "🔴", up: "🟢", normal: "🟢", degraded: "🟡" };
+const EMOJI: Record<MessageEvent, string> = { down: "🔴", up: "🟢", normal: "🟢", degraded: "🟡", expiring: "⏳" };
+
+/** Whole days until the expiry (negative once expired). */
+const daysLeft = (at: number, expiresAt: number) => Math.floor((expiresAt - at) / (24 * 60 * 60_000));
 
 function duration(ms: number, lang: Language): string {
   const min = Math.max(1, Math.round(ms / 60_000));
@@ -209,6 +239,9 @@ async function variables(c: Change, t: Template, kind: string, projects: number[
   const m = c.monitor;
   const L = TEXTS[lang];
   const date = new Date(c.at);
+  const x = c.expiry;
+  const days = x?.expiresAt ? daysLeft(c.at, x.expiresAt) : null;
+  const dateFmt = new Intl.DateTimeFormat(lang === "fr" ? "fr-FR" : "en-GB", { dateStyle: "long", timeZone: "UTC" });
   return {
     monitor: m.name,
     project: await projectName(m.projectId),
@@ -228,6 +261,23 @@ async function variables(c: Change, t: Template, kind: string, projects: number[
     page: await pageUrl(m.id, t.buttons.statusPage.page, projects),
     // For a footer like "© {year} bayfield.dev".
     year: String(date.getUTCFullYear()),
+    what: x ? L.what[x.kind] : "",
+    name: x?.name ?? "",
+    expires: x?.expiresAt ? dateFmt.format(new Date(x.expiresAt)) : "",
+    days: days !== null ? String(days) : "",
+    expiry:
+      days === null
+        ? ""
+        : days > 1
+          ? L.expiry.future.replace("{n}", String(days))
+          : days === 1
+            ? L.expiry.tomorrow
+            : days === 0
+              ? L.expiry.today
+              : days === -1
+                ? L.expiry.yesterday
+                : L.expiry.past.replace("{n}", String(-days)),
+    issuer: x?.issuer ?? "",
   };
 }
 
@@ -257,7 +307,7 @@ export async function compose(t: Template, c: Change, kind: string, projects: nu
   const add = (d: Detail, value: string) => t.details[d] && value && !`${title}
 ${body}`.includes(value) && details.push({ label: L.labels[d], value });
   add("target", v.target);
-  add("cause", ev === "down" || ev === "degraded" ? v.cause : "");
+  add("cause", ev === "down" || ev === "degraded" || ev === "expiring" ? v.cause : "");
   add("latency", v.latency);
   add("duration", ev === "up" ? v.duration : "");
   add("project", v.project);
@@ -267,7 +317,9 @@ ${body}`.includes(value) && details.push({ label: L.labels[d], value });
   if (t.buttons.statusPage.enabled && v.page) buttons.push({ label: fill(t.buttons.statusPage.label || L.buttons.statusPage, v), url: v.page });
   return {
     event: ev,
-    emoji: EMOJI[ev],
+    /** An expiry warning for something already expired: shown in the "down" colour. */
+    expired: !!c.expiry?.expiresAt && c.expiry.expiresAt <= c.at,
+    emoji: ev === "expiring" && c.expiry?.expiresAt && c.expiry.expiresAt <= c.at ? "🔴" : EMOJI[ev],
     title,
     body,
     details,
@@ -286,7 +338,8 @@ const IS_COMPONENTS_V2 = 1 << 15;
 
 /** Discord: one container in the event's colour, like a bot's components message. */
 export function discordBody(t: Template, m: Composed) {
-  const color = parseInt((m.event === "down" ? t.discord.colors.down : m.event === "degraded" ? t.discord.colors.degraded : t.discord.colors.up).slice(1), 16);
+  const hex = m.event === "down" || m.expired ? t.discord.colors.down : m.event === "degraded" || m.event === "expiring" ? t.discord.colors.degraded : t.discord.colors.up;
+  const color = parseInt(hex.slice(1), 16);
   const headline = `## ${t.discord.emoji ? `${m.emoji} ` : ""}${m.title}${m.body ? `\n${m.body}` : ""}`.slice(0, 3000);
   const inside: unknown[] = [
     t.discord.thumbnailUrl
@@ -333,7 +386,7 @@ export function ntfyRequest(url: string, m: Composed) {
   const topic = parts.pop() ?? "";
   u.pathname = `/${parts.join("/")}`;
   u.search = "";
-  const tags = { down: "rotating_light", up: "white_check_mark", normal: "white_check_mark", degraded: "warning" }[m.event];
+  const tags = { down: "rotating_light", up: "white_check_mark", normal: "white_check_mark", degraded: "warning", expiring: "hourglass" }[m.event];
   return {
     url: u.toString(),
     body: {
@@ -341,7 +394,7 @@ export function ntfyRequest(url: string, m: Composed) {
       title: m.title,
       message: [m.body, ...m.details.map((d) => `${d.label}: ${d.value}`)].filter(Boolean).join("\n") || m.title,
       tags: [tags],
-      priority: m.event === "down" ? 5 : 3,
+      priority: m.event === "down" || m.expired ? 5 : m.event === "expiring" ? 4 : 3,
       ...(m.buttons[0] ? { click: m.buttons[0].url } : {}),
       actions: m.buttons.slice(0, 3).map((b) => ({ action: "view", label: b.label, url: b.url })),
     },

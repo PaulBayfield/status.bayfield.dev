@@ -3,11 +3,12 @@
 import { all, run } from "./db.ts";
 import { hmacSha256 } from "./crypto.ts";
 import type { Monitor, Outcome, Result, Status } from "./checks.ts";
+import type { Expiry } from "./expiry.ts";
 import { compose, discordBody, discordUrl, ntfyRequest, slackText, storedTemplate, type MessageEvent, type Template } from "./messages.ts";
 
 export const WEBHOOK_KINDS = ["discord", "slack", "ntfy", "generic"] as const;
 export type WebhookKind = (typeof WEBHOOK_KINDS)[number];
-export const EVENTS = ["down", "up", "degraded"] as const;
+export const EVENTS = ["down", "up", "degraded", "expiry"] as const;
 export type Event = (typeof EVENTS)[number];
 
 export interface Webhook {
@@ -35,9 +36,11 @@ export interface Change {
   at: number;
   /** When it went down, for a recovery. */
   downSince: number | null;
+  /** A certificate or domain expiry warning (the state didn't change). */
+  expiry?: Expiry;
 }
 
-const eventOf = (c: Change): Event => (c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : "up");
+const eventOf = (c: Change): Event => (c.expiry ? "expiry" : c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : "up");
 
 type Target = Pick<Webhook, "kind" | "url" | "secret" | "template" | "projects">;
 
@@ -109,7 +112,10 @@ export async function notify(changes: Change[]) {
     const ev = eventOf(c);
     // "Back to normal" after degraded counts as an "up" event only for webhooks that get degraded ones.
     const targets = hooks.filter(
-      (w) => listHas(w.events, ev) && (!w.projects || listHas(w.projects, c.monitor.projectId)) && !(ev === "up" && c.from === "degraded" && !listHas(w.events, "degraded")),
+      (w) =>
+        listHas(w.events, ev) &&
+        (!w.projects || listHas(w.projects, c.monitor.projectId)) &&
+        !(ev === "up" && c.from === "degraded" && !c.expiry && !listHas(w.events, "degraded")),
     );
     await Promise.all(
       targets.map(async (w) => {
@@ -126,13 +132,29 @@ export function testChange(event: MessageEvent = "down", monitor?: Partial<Monit
   const now = Date.now();
   const to = event === "down" ? "down" : event === "degraded" ? "degraded" : "up";
   const from = event === "normal" ? "degraded" : event === "up" ? "down" : "up";
-  const message = { down: "Answered 503 Service Unavailable, expected 200-299", degraded: "Slow: 2340 ms (over 1500 ms)", up: "200 OK", normal: "200 OK" }[event];
+  const message = { down: "Answered 503 Service Unavailable, expected 200-299", degraded: "Slow: 2340 ms (over 1500 ms)", up: "200 OK", normal: "200 OK", expiring: "" }[event];
   return {
     monitor: { id: 0, projectId: null, name: "Example API", type: "http", target: "https://api.example.com/health", status: to, ...monitor } as Monitor,
     from,
     to,
-    result: { status: to, latency: event === "down" ? 112 : event === "degraded" ? 2340 : 84, code: event === "down" ? 503 : 200, message },
+    result: { status: to, latency: event === "expiring" ? null : event === "down" ? 112 : event === "degraded" ? 2340 : 84, code: event === "down" ? 503 : 200, message },
     at: now,
     downSince: event === "up" ? now - 47 * 60_000 : null,
+    ...(event === "expiring"
+      ? {
+          expiry: {
+            monitorId: 0,
+            kind: "certificate" as const,
+            name: "api.example.com",
+            expiresAt: now + 9 * 24 * 60 * 60_000 + 60_000,
+            issuedAt: now - 80 * 24 * 60 * 60_000,
+            issuer: "Let's Encrypt (R11)",
+            source: "tls",
+            error: "",
+            checkedAt: now,
+            stage: "warn",
+          },
+        }
+      : {}),
   };
 }

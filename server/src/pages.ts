@@ -6,7 +6,7 @@ import { all, batch, first, run, type Param } from "./db.ts";
 import { HttpError, bad, body, id, str } from "./http.ts";
 import { requireCollaborator, type AppEnv } from "./auth.ts";
 import type { Monitor } from "./checks.ts";
-import { daysByMonitor, publicMonitorView } from "./views.ts";
+import { daysByMonitor, latencySeries, publicMonitorView } from "./views.ts";
 import { forgetPages } from "./public.ts";
 
 interface PageRow {
@@ -15,6 +15,7 @@ interface PageRow {
   title: string;
   description: string;
   logoUrl: string;
+  display: string;
   isDefault: number;
   createdAt: number;
   updatedAt: number;
@@ -33,6 +34,30 @@ export interface PageGroup {
 }
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+/** What a page shows. Response times: not at all, a chart visitors can open, or open already. */
+export interface Display {
+  tiles: boolean;
+  bars: boolean;
+  incidents: boolean;
+  charts: "off" | "collapsed" | "expanded";
+}
+
+const DEFAULT_DISPLAY: Display = { tiles: true, bars: true, incidents: true, charts: "off" };
+
+function parseDisplay(v: unknown): Display {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const flag = (k: "tiles" | "bars" | "incidents") => (typeof o[k] === "boolean" ? (o[k] as boolean) : DEFAULT_DISPLAY[k]);
+  return { tiles: flag("tiles"), bars: flag("bars"), incidents: flag("incidents"), charts: o.charts === "collapsed" || o.charts === "expanded" ? o.charts : "off" };
+}
+
+export function storedDisplay(json: string): Display {
+  try {
+    return parseDisplay(json ? JSON.parse(json) : {});
+  } catch {
+    return { ...DEFAULT_DISPLAY };
+  }
+}
 const MAX_GROUPS = 30;
 const DAY = 24 * 60 * 60_000;
 
@@ -60,6 +85,7 @@ const pageView = (p: PageRow, groups: PageGroup[]) => ({
   title: p.title,
   description: p.description,
   logoUrl: p.logoUrl,
+  display: storedDisplay(p.display),
   isDefault: !!p.isDefault,
   groups,
   updatedAt: new Date(p.updatedAt).toISOString(),
@@ -74,6 +100,18 @@ export async function pagesByMonitor(): Promise<Map<number, { id: number; slug: 
   const out = new Map<number, { id: number; slug: string; title: string }[]>();
   for (const { monitorId, ...p } of rows) out.set(monitorId, [...(out.get(monitorId) ?? []), p]);
   return out;
+}
+
+/** A page's response time chart for one of its monitors, when the page shows them. */
+export async function publicSeries(slug: string, monitorId: number, range: string | undefined) {
+  const page = await first<PageRow>("SELECT * FROM status_pages WHERE slug = ?", slug);
+  if (!page || storedDisplay(page.display).charts === "off") return null;
+  const listed = await first(
+    "SELECT 1 AS x FROM status_page_monitors l JOIN status_page_groups g ON g.id = l.group_id WHERE g.page_id = ? AND l.monitor_id = ?",
+    page.id,
+    monitorId,
+  );
+  return listed ? latencySeries(monitorId, range) : null;
 }
 
 /** What a visitor sees of a page: its monitors without targets or errors, and the last week's outages. */
@@ -99,6 +137,7 @@ export async function publicPage(slug: string | null) {
     title: page.title,
     description: page.description,
     logoUrl: page.logoUrl,
+    display: storedDisplay(page.display),
     updatedAt: new Date().toISOString(),
     groups: groups.map((g) => ({
       name: g.name,
@@ -193,11 +232,12 @@ pageRoutes.post("/", requireCollaborator, async (c) => {
   const isDefault = !!b.isDefault || !(await first("SELECT 1 AS x FROM status_pages"));
   const now = Date.now();
   const { id: pid } = await run(
-    "INSERT INTO status_pages (slug, title, description, logo_url, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO status_pages (slug, title, description, logo_url, display, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     slug,
     title,
     str(b.description, 1000),
     parseLogo(b.logoUrl),
+    JSON.stringify(parseDisplay(b.display)),
     isDefault,
     now,
     now,
@@ -215,10 +255,21 @@ pageRoutes.patch("/:id", requireCollaborator, async (c) => {
   const slug = b.slug !== undefined ? await parseSlug(b.slug, p.id) : p.slug;
   const description = b.description !== undefined ? str(b.description, 1000) : p.description;
   const logoUrl = b.logoUrl !== undefined ? parseLogo(b.logoUrl) : p.logoUrl;
+  const display = b.display !== undefined ? JSON.stringify(parseDisplay(b.display)) : p.display;
   // There's always a default page: it can be moved to another one, not switched off.
   const isDefault = b.isDefault === true || !!p.isDefault;
   const statements: [string, ...Param[]][] = [
-    ["UPDATE status_pages SET title = ?, slug = ?, description = ?, logo_url = ?, is_default = ?, updated_at = ? WHERE id = ?", title, slug, description, logoUrl, isDefault, Date.now(), p.id],
+    [
+      "UPDATE status_pages SET title = ?, slug = ?, description = ?, logo_url = ?, display = ?, is_default = ?, updated_at = ? WHERE id = ?",
+      title,
+      slug,
+      description,
+      logoUrl,
+      display,
+      isDefault,
+      Date.now(),
+      p.id,
+    ],
   ];
   if (isDefault) statements.push(["UPDATE status_pages SET is_default = 0 WHERE id <> ?", p.id]);
   if (b.groups !== undefined) statements.push(...groupStatements(p.id, await parseGroups(b.groups)));

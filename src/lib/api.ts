@@ -106,6 +106,13 @@ export interface Monitor {
   lastPingAt: string | null;
   /** The status pages that show it. */
   pages: { id: number; slug: string; title: string }[];
+  /** HTTP (and TCP, for domains) monitors: watch the SSL certificate's and the domain's expiry. */
+  certCheck: boolean;
+  domainCheck: boolean;
+  /** Empty: the registered domain of the target's host. */
+  domainName: string;
+  expiryWarnDays: number;
+  expiries: ExpiryInfo[];
   paused: boolean;
   status: Status;
   lastCheckedAt: string | null;
@@ -133,9 +140,49 @@ export interface MonitorDetails extends Monitor {
   openIncident: { id: number; startedAt: string; cause: string } | null;
 }
 
+export interface ExpiryInfo {
+  kind: "certificate" | "domain";
+  name: string;
+  expiresAt: string | null;
+  issuedAt: string | null;
+  /** The certificate's issuer, or the domain's registrar. */
+  issuer: string;
+  /** tls: read from the server; ct: Certificate Transparency logs; rdap: the registry. */
+  source: string;
+  error: string;
+  checkedAt: string;
+}
+
+/** Whole days until it expires (negative once expired), or null when unknown. */
+export const daysLeft = (e: ExpiryInfo): number | null => (e.expiresAt ? Math.floor((new Date(e.expiresAt).getTime() - Date.now()) / 86_400_000) : null);
+
+/** down: expired; degraded: within the warning days; up: fine; pending: unknown. */
+export function expiryStatus(e: ExpiryInfo, warnDays: number): Status {
+  const d = daysLeft(e);
+  if (d === null) return "pending";
+  return d < 0 ? "down" : d <= warnDays ? "degraded" : "up";
+}
+
+/** api.example.co.uk → example.co.uk: the domain the server checks when none is set. */
+export function registeredDomain(target: string, type: MonitorType): string {
+  let host = "";
+  try {
+    host = type === "http" ? new URL(target).hostname : target.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  } catch {
+    return "";
+  }
+  const labels = host.toLowerCase().split(".");
+  if (!host.includes(".") || /^[\d.]+$/.test(host) || host.includes(":")) return "";
+  if (labels.length <= 2) return labels.join(".");
+  const sld = labels[labels.length - 2];
+  const second = ["co", "com", "net", "org", "gov", "edu", "ac", "ltd", "plc", "me", "gouv", "asso"].includes(sld) && labels[labels.length - 1].length === 2;
+  return labels.slice(second ? -3 : -2).join(".");
+}
+
 export interface SeriesPoint {
   t: string;
   avg: number | null;
+  min: number | null;
   max: number | null;
   n: number;
   down: number;
@@ -169,7 +216,7 @@ export interface Incident {
 
 export const WEBHOOK_KINDS = ["discord", "slack", "ntfy", "generic"] as const;
 export type WebhookKind = (typeof WEBHOOK_KINDS)[number];
-export const EVENTS = ["down", "up", "degraded"] as const;
+export const EVENTS = ["down", "up", "degraded", "expiry"] as const;
 export type WebhookEvent = (typeof EVENTS)[number];
 
 export interface Webhook {
@@ -186,12 +233,12 @@ export interface Webhook {
   template: MessageTemplate;
 }
 
-export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded"] as const;
-/** down, back up (after down), back to normal (after degraded), degraded. */
+export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring"] as const;
+/** down, back up (after down), back to normal (after degraded), degraded, a certificate or domain expiring. */
 export type MessageEvent = (typeof MESSAGE_EVENTS)[number];
 export const MESSAGE_DETAILS = ["target", "cause", "latency", "duration", "project", "time"] as const;
 export type MessageDetail = (typeof MESSAGE_DETAILS)[number];
-export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page"] as const;
+export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page", "what", "name", "expires", "days", "expiry", "issuer"] as const;
 
 /** What a webhook's notifications say and look like. Empty texts: the language's defaults. */
 export interface MessageTemplate {
@@ -231,9 +278,18 @@ export interface StatusPage {
   description: string;
   /** A link to an image hosted elsewhere; empty for the app's icon. */
   logoUrl: string;
+  display: PageDisplay;
   isDefault: boolean;
   groups: StatusPageGroup[];
   updatedAt: string;
+}
+
+/** What a status page shows. Response times: hidden, a chart visitors open, or open already. */
+export interface PageDisplay {
+  tiles: boolean;
+  bars: boolean;
+  incidents: boolean;
+  charts: "off" | "collapsed" | "expanded";
 }
 
 /** What visitors get: /api/public/status (the default page) or /api/public/pages/<slug>. */
@@ -242,6 +298,7 @@ export interface PublicStatus {
   title: string;
   description: string;
   logoUrl: string;
+  display: PageDisplay;
   updatedAt: string;
   groups: { name: string; monitors: { id: number; name: string; status: Status; statusSince: string | null; uptime90: number | null; history: HistoryDay[] }[] }[];
   incidents: { monitorId: number; monitorName: string; startedAt: string; resolvedAt: string | null }[];

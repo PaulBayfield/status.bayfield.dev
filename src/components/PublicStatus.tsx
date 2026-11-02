@@ -3,13 +3,14 @@
 // Same look as the overview: header bar, banner, tiles, grouped monitor rows.
 
 import { useEffect, useState } from "react";
-import { api, ApiError, type PublicStatus as Data } from "../lib/api";
+import { api, ApiError, type PageDisplay, type PublicStatus as Data, type Series } from "../lib/api";
 import { overall } from "../lib/app";
 import { Markdown } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
 import { duration } from "./IncidentsPage";
 import { StatusDot, StatusIcon, UptimeBars, pct, statusKey } from "./status";
-import { AlertTriangle, CircleCheck, CircleDashed, CircleX, Clock } from "./icons";
+import { Activity, AlertTriangle, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX, Clock } from "./icons";
+import { LatencyChart } from "./LatencyChart";
 import { Spinner } from "./common";
 
 type PublicMonitor = Data["groups"][number]["monitors"][number];
@@ -100,7 +101,7 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
                 </div>
               </div>
 
-              {active.length > 0 && (
+              {active.length > 0 && data.display.tiles && (
                 <div className="tiles public-tiles">
                   <Tile label={t("monitorsUp")} value={`${f.number(active.filter((m) => m.status === "up" || m.status === "degraded").length)} / ${f.number(active.length)}`} />
                   <Tile label={t("down")} value={f.number(down.length)} tone={down.length ? "down" : undefined} />
@@ -118,13 +119,13 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
                   )}
                   <div className="monitor-list">
                     {g.monitors.map((m) => (
-                      <PublicRow key={m.id} m={m} />
+                      <PublicRow key={m.id} m={m} slug={data.slug} display={data.display} />
                     ))}
                   </div>
                 </section>
               ))}
 
-              {(ongoing.length > 0 || past.length > 0) && (
+              {data.display.incidents && (ongoing.length > 0 || past.length > 0) && (
                 <section className="monitor-group">
                   <h2 className="group-title">{t("incidents")}</h2>
                   <div className="monitor-list">
@@ -180,28 +181,69 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: "do
   );
 }
 
-function PublicRow({ m }: { m: PublicMonitor }) {
+function PublicRow({ m, slug, display }: { m: PublicMonitor; slug: string; display: PageDisplay }) {
   const { t, f } = useSettings();
+  const [open, setOpen] = useState(display.charts === "expanded");
+  const charts = display.charts !== "off";
   return (
-    <div className="monitor-row public-row">
-      <div className="monitor-main">
-        <StatusDot status={m.status} />
-        <div className="monitor-name">
-          <span className="name">{m.name}</span>
-          <span className={`target s-${m.status}`}>
-            <StatusIcon status={m.status} size={12} />
-            {t(statusKey(m.status))}
-            {m.statusSince && m.status !== "up" && <span className="muted"> · {f.relative(m.statusSince, t)}</span>}
-          </span>
+    <div className="public-item">
+      <div className="monitor-row public-row">
+        <div className="monitor-main">
+          <StatusDot status={m.status} />
+          <div className="monitor-name">
+            <span className="name">{m.name}</span>
+            <span className={`target s-${m.status}`}>
+              <StatusIcon status={m.status} size={12} />
+              {t(statusKey(m.status))}
+              {m.statusSince && m.status !== "up" && <span className="muted"> · {f.relative(m.statusSince, t)}</span>}
+              {charts && (
+                <button type="button" className="chart-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+                  {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <Activity size={12} />
+                  {t("responseTime")}
+                </button>
+              )}
+            </span>
+          </div>
+        </div>
+        <div className="monitor-bars">{display.bars && <UptimeBars history={m.history} days={90} compact />}</div>
+        <div className="monitor-stat">
+          <span className="stat-value">{pct(m.uptime90, f)}</span>
+          <span className="stat-label">{t("uptime90d")}</span>
         </div>
       </div>
-      <div className="monitor-bars">
-        <UptimeBars history={m.history} days={90} compact />
+      {charts && open && <PublicChart slug={slug} id={m.id} />}
+    </div>
+  );
+}
+
+/** A monitor's response times, as on its page in the app: min, mean and max. */
+function PublicChart({ slug, id }: { slug: string; id: number }) {
+  const { t } = useSettings();
+  const [range, setRange] = useState<"24h" | "7d" | "30d">("24h");
+  const [series, setSeries] = useState<Series | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setError(null);
+    api<Series>(`/public/pages/${encodeURIComponent(slug)}/series/${id}?range=${range}`).then(
+      (s) => live && setSeries(s),
+      (e: Error) => live && setError(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [slug, id, range]);
+  return (
+    <div className="public-chart">
+      <div className="segmented">
+        {(["24h", "7d", "30d"] as const).map((r) => (
+          <button key={r} className={range === r ? "active" : ""} onClick={() => setRange(r)}>
+            {t(`range_${r}`)}
+          </button>
+        ))}
       </div>
-      <div className="monitor-stat">
-        <span className="stat-value">{pct(m.uptime90, f)}</span>
-        <span className="stat-label">{t("uptime90d")}</span>
-      </div>
+      {error ? <p className="error-text small">{error}</p> : series ? <LatencyChart series={series} range={range} height={180} /> : <div className="chart-empty"><Spinner /></div>}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 // One monitor: its state, uptime over several spans, response times, incidents and recent checks.
 
 import { useState } from "react";
-import { api, canContribute, type Check, type Incident, type MonitorDetails, type MonitorType, type Series } from "../lib/api";
+import { api, canContribute, daysLeft, expiryStatus, type Check, type Incident, type MonitorDetails, type MonitorType, type Series } from "../lib/api";
 import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
 import { useSettings } from "../lib/settings";
@@ -9,7 +9,7 @@ import { ConfirmDialog, CopyButton, Spinner, useToast } from "./common";
 import { LatencyChart } from "./LatencyChart";
 import { IncidentList } from "./IncidentsPage";
 import { StatusPill, UptimeBars, ms, pct } from "./status";
-import { ExternalLink, Globe, HeartPulse, Pause, Pencil, Play, RefreshCw, Server, Trash } from "./icons";
+import { ExternalLink, Globe, HeartPulse, Pause, Pencil, Play, RefreshCw, Server, Shield, Trash } from "./icons";
 
 export function MonitorTypeIcon({ type, size = 14 }: { type: MonitorType; size?: number }) {
   if (type === "tcp") return <Server size={size} />;
@@ -159,6 +159,8 @@ export function MonitorPage({ id }: { id: number }) {
         />
       </div>
 
+      {(m.certCheck || m.domainCheck) && <ExpiryCard m={m} editor={editor} onChecked={refresh} />}
+
       {m.type === "heartbeat" && editor && m.pushUrl && <PushCard url={m.pushUrl} interval={m.intervalS} onRegenerated={refresh} id={m.id} />}
 
       <section className="card">
@@ -295,6 +297,74 @@ function PushCard({ url, interval: every, id, onRegenerated }: { url: string; in
           onClose={() => setConfirm(false)}
         />
       )}
+    </section>
+  );
+}
+
+/** The SSL certificate and the domain's registration: until when, from whom, and how soon. */
+function ExpiryCard({ m, editor, onChecked }: { m: MonitorDetails; editor: boolean; onChecked: () => void }) {
+  const { t, f } = useSettings();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const kinds = [...(m.certCheck ? (["certificate"] as const) : []), ...(m.domainCheck ? (["domain"] as const) : [])];
+  const check = async () => {
+    setBusy(true);
+    try {
+      await api(`/app/monitors/${m.id}/expiry-check`, { method: "POST" });
+      onChecked();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card">
+      <div className="card-header">
+        <h3>{t("expiriesTitle")}</h3>
+        {editor && (
+          <button className="text-button" disabled={busy} onClick={() => void check()}>
+            {busy ? <Spinner /> : <RefreshCw size={14} />}
+            {t("checkAgain")}
+          </button>
+        )}
+      </div>
+      <div className="expiry-list">
+        {kinds.map((kind) => {
+          const e = m.expiries.find((x) => x.kind === kind);
+          const status = e ? expiryStatus(e, m.expiryWarnDays) : "pending";
+          const d = e ? daysLeft(e) : null;
+          return (
+            <div key={kind} className={`expiry-row s-${status}`}>
+              <span className="expiry-icon">{kind === "certificate" ? <Shield size={16} /> : <Globe size={16} />}</span>
+              <div className="expiry-main">
+                <strong>
+                  {t(kind === "certificate" ? "expCertificate" : "expDomain")}
+                  {e?.name && <span className="muted"> · {e.name}</span>}
+                </strong>
+                {!e ? (
+                  <span className="small muted">{t("expNotChecked")}</span>
+                ) : (
+                  <>
+                    {e.expiresAt && (
+                      <span className="small">
+                        {t(kind === "certificate" ? "expValidUntil" : "expRegisteredUntil", { date: f.mediumDate(e.expiresAt) })}
+                        {e.issuer && <span className="muted"> · {t(kind === "certificate" ? "expIssuedBy" : "expRegistrar", { name: e.issuer })}</span>}
+                      </span>
+                    )}
+                    {e.error && <span className={`small ${e.expiresAt ? "muted" : "error-text"}`}>{e.error}</span>}
+                    {e.source === "ct" && <span className="small muted">{t("expFromCt")}</span>}
+                    <span className="small muted">{t("expChecked", { when: f.relative(e.checkedAt, t) })}</span>
+                  </>
+                )}
+              </div>
+              <span className="expiry-days">
+                {d === null ? "—" : d < 0 ? t("expExpiredAgo", { n: f.number(-d) }) : d === 0 ? t("expToday") : t("expDaysLeft", { n: f.number(d) })}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

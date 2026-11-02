@@ -1,12 +1,12 @@
 // The overview: how everything is doing (banner and tiles), then every monitor with its 90 days.
 
 import type { CSSProperties } from "react";
-import { canContribute, type Monitor, type Project } from "../lib/api";
+import { canContribute, daysLeft, expiryStatus, type Monitor, type Project } from "../lib/api";
 import { overall, useApp } from "../lib/app";
 import { useSettings } from "../lib/settings";
 import { MonitorTypeIcon } from "./MonitorPage";
 import { StatusDot, UptimeBars, ms, pct } from "./status";
-import { Activity, AlertTriangle, CircleCheck, CircleX, Plus } from "./icons";
+import { Activity, AlertTriangle, CircleCheck, CircleX, Globe, Plus, Shield } from "./icons";
 
 export function Overview() {
   const { t, f, settings } = useSettings();
@@ -125,6 +125,17 @@ function MonitorRow({ m }: { m: Monitor }) {
           <span className="target">
             <MonitorTypeIcon type={m.type} size={12} />
             {m.type === "heartbeat" ? t("type_heartbeat") : m.target.replace(/^https?:\/\//, "")}
+            {m.expiries.map((e) => {
+              const s = expiryStatus(e, m.expiryWarnDays);
+              const d = daysLeft(e);
+              if (s !== "down" && s !== "degraded") return null;
+              return (
+                <span key={e.kind} className={`expiry-badge s-${s}`} title={t(e.kind === "certificate" ? "expCertificate" : "expDomain")}>
+                  {e.kind === "certificate" ? <Shield size={11} /> : <Globe size={11} />}
+                  {d! < 0 ? t("expExpiredShort") : t("expDaysShort", { n: d! })}
+                </span>
+              );
+            })}
           </span>
         </div>
       </div>

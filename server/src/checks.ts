@@ -7,6 +7,7 @@ import { connect } from "cloudflare:sockets";
 import { all, batch, first, run } from "./db.ts";
 import { config } from "./config.ts";
 import { notify, type Change } from "./notify.ts";
+import { checkExpiries, dueExpiries, type ExpiryNotice } from "./expiry.ts";
 
 export type MonitorType = "http" | "tcp" | "heartbeat";
 export type Status = "pending" | "up" | "degraded" | "down";
@@ -39,6 +40,11 @@ export interface Monitor {
   statusSince: number | null;
   createdAt: number;
   updatedAt: number;
+  /** HTTP monitors: watch the SSL certificate's and the domain's expiry. */
+  certCheck: number;
+  domainCheck: number;
+  domainName: string;
+  expiryWarnDays: number;
 }
 
 export interface Result {
@@ -249,9 +255,33 @@ export async function runDue(now = Date.now()) {
     }
   });
   const real = changes.filter((c): c is Change => !!c);
+  // Certificates and domains, a couple of monitors at a time, with the requests left in the budget.
+  if (due.length <= MAX_CHECKS_PER_RUN - 10) {
+    for (const { monitor, kinds } of await dueExpiries(2, now)) {
+      try {
+        real.push(...(await checkExpiries(monitor, kinds)).map(expiryChange));
+      } catch (e) {
+        console.error(`Expiry check of monitor ${monitor.id} failed:`, e);
+      }
+    }
+  }
   if (real.length) await notify(real);
   await housekeeping(now);
   return { checked: due.length, changes: real.length };
+}
+
+/** An expiry warning, as a notification (the monitor's state doesn't change). */
+export function expiryChange(n: ExpiryNotice): Change {
+  const status: Outcome = n.monitor.status === "pending" ? "up" : n.monitor.status;
+  return {
+    monitor: n.monitor,
+    from: status,
+    to: status,
+    result: { status, latency: null, code: null, message: n.expiry.error },
+    at: Date.now(),
+    downSince: null,
+    expiry: n.expiry,
+  };
 }
 
 /** Old checks, expired sessions: once an hour. */

@@ -341,7 +341,7 @@ function blankTemplate(language: "en" | "fr"): MessageTemplate {
   const blank = { title: "", body: "" };
   return {
     language,
-    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank } },
+    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
     buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
@@ -351,7 +351,7 @@ function blankTemplate(language: "en" | "fr"): MessageTemplate {
       footer: "",
       emoji: true,
       colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524" },
-      mentions: { down: "", up: "", normal: "", degraded: "" },
+      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "" },
     },
   };
 }

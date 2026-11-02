@@ -1,7 +1,7 @@
 // The right-hand panel: the add/edit forms (monitor, webhook, project), otherwise the activity feed.
 
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import { api, EVENTS, MONITOR_TYPES, WEBHOOK_KINDS, type Incident, type Monitor, type MonitorType, type Project, type StatusPage, type Webhook, type WebhookKind } from "../lib/api";
+import { api, EVENTS, MONITOR_TYPES, WEBHOOK_KINDS, type Incident, type Monitor, type MonitorType, type PageDisplay, type Project, type StatusPage, type Webhook, type WebhookKind, registeredDomain } from "../lib/api";
 import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
 import { useSettings } from "../lib/settings";
@@ -169,6 +169,10 @@ function MonitorForm({ monitor, projectId }: { monitor?: Monitor; projectId?: nu
     timeoutMs: monitor?.timeoutMs ?? 10_000,
     retries: monitor?.retries ?? 2,
     degradedMs: monitor?.degradedMs ?? 0,
+    certCheck: monitor?.certCheck ?? false,
+    domainCheck: monitor?.domainCheck ?? false,
+    domainName: monitor?.domainName ?? "",
+    expiryWarnDays: monitor?.expiryWarnDays ?? 14,
   });
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -252,6 +256,45 @@ function MonitorForm({ monitor, projectId }: { monitor?: Monitor; projectId?: nu
       )}
 
       {form.type !== "heartbeat" && (
+        <div className="form-field">
+          <span className="form-label">{t("expiriesTitle")}</span>
+          {form.type === "http" && (
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={form.certCheck && /^https:/i.test(form.target)}
+                disabled={!/^https:/i.test(form.target)}
+                onChange={(e) => set({ certCheck: e.target.checked })}
+              />
+              {t("watchCert")}
+            </label>
+          )}
+          <label className="checkbox">
+            <input type="checkbox" checked={form.domainCheck} onChange={(e) => set({ domainCheck: e.target.checked })} />
+            {t("watchDomain")}
+          </label>
+          {form.domainCheck && (
+            <input
+              className="text-field"
+              value={form.domainName}
+              spellCheck={false}
+              aria-label={t("domainNameLabel")}
+              onChange={(e) => set({ domainName: e.target.value.trim().toLowerCase() })}
+              placeholder={registeredDomain(form.target, form.type) || "example.com"}
+            />
+          )}
+          {(form.certCheck || form.domainCheck) && (
+            <label className="inline-number">
+              {t("expiryWarnBefore")}
+              <input className="text-field" type="number" min={1} max={90} value={form.expiryWarnDays} onChange={(e) => set({ expiryWarnDays: Number(e.target.value) })} />
+              {t("expiryWarnDays")}
+            </label>
+          )}
+          <span className="form-hint">{t("expiriesHint")}</span>
+        </div>
+      )}
+
+      {form.type !== "heartbeat" && (
         <>
           <button type="button" className="disclosure" onClick={() => setAdvanced((a) => !a)}>
             {advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -313,7 +356,7 @@ function WebhookForm({ webhook }: { webhook?: Webhook }) {
     url: webhook?.url ?? "",
     secret: "",
     clearSecret: false,
-    events: webhook?.events ?? ["down", "up"],
+    events: webhook?.events ?? ["down", "up", "expiry"],
     projects: webhook?.projects ?? [],
     enabled: webhook?.enabled ?? true,
   });
@@ -495,6 +538,7 @@ function PageForm({ page }: { page?: StatusPage }) {
   const [description, setDescription] = useState(page?.description ?? "");
   const [logoUrl, setLogoUrl] = useState(page?.logoUrl ?? "");
   const [isDefault, setIsDefault] = useState(page?.isDefault ?? false);
+  const [display, setDisplay] = useState<PageDisplay>(page?.display ?? { tiles: true, bars: true, incidents: true, charts: "off" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -503,7 +547,7 @@ function PageForm({ page }: { page?: StatusPage }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = await api<StatusPage>(page ? `${PAGES}/${page.id}` : PAGES, { method: page ? "PATCH" : "POST", body: { title, slug, description, logoUrl, ...(isDefault ? { isDefault: true } : {}) } });
+      const saved = await api<StatusPage>(page ? `${PAGES}/${page.id}` : PAGES, { method: page ? "PATCH" : "POST", body: { title, slug, description, logoUrl, display, ...(isDefault ? { isDefault: true } : {}) } });
       invalidate(PAGES);
       window.dispatchEvent(new Event("status:pages"));
       toast(page ? t("saved") : t("pageCreated"));
@@ -558,6 +602,22 @@ function PageForm({ page }: { page?: StatusPage }) {
           <Switch checked={isDefault} onChange={(on) => setIsDefault(on || !!page?.isDefault)} label={t("defaultPage")} />
         </div>
         <span className="form-hint">{t("defaultPageHint")}</span>
+        <div className="form-field">
+          <span className="form-label">{t("displayTitle")}</span>
+          {(["tiles", "bars", "incidents"] as const).map((k) => (
+            <label key={k} className="checkbox">
+              <input type="checkbox" checked={display[k]} onChange={(e) => setDisplay({ ...display, [k]: e.target.checked })} />
+              {t(`display_${k}`)}
+            </label>
+          ))}
+        </div>
+        <Field label={t("displayCharts")} hint={t("displayChartsHint")}>
+          <select value={display.charts} onChange={(e) => setDisplay({ ...display, charts: e.target.value as PageDisplay["charts"] })}>
+            <option value="off">{t("charts_off")}</option>
+            <option value="collapsed">{t("charts_collapsed")}</option>
+            <option value="expanded">{t("charts_expanded")}</option>
+          </select>
+        </Field>
       </FormShell>
       {deleting && page && (
         <ConfirmDialog
