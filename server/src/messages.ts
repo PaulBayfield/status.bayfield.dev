@@ -70,7 +70,7 @@ const TEXTS = {
   },
 } as const;
 
-export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "link", "page"] as const;
+export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page"] as const;
 
 /** The default texts of each language, for the editor's placeholders. */
 export function defaultTexts() {
@@ -219,6 +219,8 @@ async function variables(c: Change, lang: Language, kind: string): Promise<Vars>
         : `${new Intl.DateTimeFormat(lang === "fr" ? "fr-FR" : "en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date)} UTC`,
     link: `${config().publicUrl}/m/${m.id}`,
     page: await pageUrl(m.id),
+    // For a footer like "© {year} bayfield.dev".
+    year: String(date.getUTCFullYear()),
   };
 }
 
@@ -253,8 +255,8 @@ ${body}`.includes(value) && details.push({ label: L.labels[d], value });
   add("project", v.project);
   add("time", v.time);
   const buttons: { label: string; url: string }[] = [];
-  if (t.buttons.monitor.enabled) buttons.push({ label: t.buttons.monitor.label || L.buttons.monitor, url: v.link });
-  if (t.buttons.statusPage.enabled && v.page) buttons.push({ label: t.buttons.statusPage.label || L.buttons.statusPage, url: v.page });
+  if (t.buttons.monitor.enabled) buttons.push({ label: fill(t.buttons.monitor.label || L.buttons.monitor, v), url: v.link });
+  if (t.buttons.statusPage.enabled && v.page) buttons.push({ label: fill(t.buttons.statusPage.label || L.buttons.statusPage, v), url: v.page });
   return {
     event: ev,
     emoji: EMOJI[ev],
