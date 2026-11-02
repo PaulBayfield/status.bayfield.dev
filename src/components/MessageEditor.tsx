@@ -12,6 +12,7 @@ import {
   type MessageDefaults,
   type MessageEvent,
   type MessageTemplate,
+  type StatusPage,
   type Webhook,
 } from "../lib/api";
 import { useApp } from "../lib/app";
@@ -21,6 +22,7 @@ import { inline } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
 import { Spinner, useToast } from "./common";
 import { kindLabel, WEBHOOKS } from "./NotificationsPage";
+import { PAGES } from "./SidePanel";
 import { Switch } from "./settings/common";
 import { ChevronLeft, RefreshCw, Send } from "./icons";
 
@@ -32,6 +34,7 @@ export function MessageEditor({ id }: { id: number }) {
   const toast = useToast();
   const hooks = useApi<Webhook[]>(WEBHOOKS, true);
   const defaults = useApi<MessageDefaults>(`${WEBHOOKS}/defaults`).data;
+  const pages = useApi<StatusPage[]>(PAGES).data;
   const hook = hooks.data?.find((w) => w.id === id);
   const [draft, setDraft] = useState<MessageTemplate | null>(null);
   const [event, setEvent] = useState<MessageEvent>("down");
@@ -55,7 +58,7 @@ export function MessageEditor({ id }: { id: number }) {
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [dirty]);
 
-  const preview = usePreview(hook?.kind, draft, event);
+  const preview = usePreview(hook?.kind, hook?.id, draft, event);
 
   if (hooks.data && !hook) return <div className="page"><p className="muted">{t("webhookNotFound")}</p></div>;
   if (!hook || !draft || !defaults) return <div className="page"><Spinner /></div>;
@@ -209,6 +212,22 @@ export function MessageEditor({ id }: { id: number }) {
                   {t(b === "monitor" ? "btnMonitor" : "btnStatusPage")}
                 </label>
                 {d.buttons[b].enabled && textField(`buttons.${b}.label`, d.buttons[b].label, texts.buttons[b], { max: 80 })}
+                {b === "statusPage" && d.buttons.statusPage.enabled && (
+                  <select
+                    className="button-page"
+                    aria-label={t("buttonPage")}
+                    value={d.buttons.statusPage.page}
+                    disabled={!editor}
+                    onChange={(e) => update((t) => (t.buttons.statusPage.page = e.target.value))}
+                  >
+                    <option value="">{t("buttonPageAuto")}</option>
+                    {(pages ?? []).map((p) => (
+                      <option key={p.id} value={p.slug}>
+                        {p.title} (/status/{p.slug})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             ))}
           </section>
@@ -324,7 +343,7 @@ function blankTemplate(language: "en" | "fr"): MessageTemplate {
     language,
     messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
-    buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "" } },
+    buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
       username: "Status",
       avatarUrl: "",
@@ -347,14 +366,14 @@ interface Preview {
 }
 
 /** The server renders the draft (debounced), so the preview is exactly what would be sent. */
-function usePreview(kind: Webhook["kind"] | undefined, draft: MessageTemplate | null, event: MessageEvent): Preview | null {
+function usePreview(kind: Webhook["kind"] | undefined, webhookId: number | undefined, draft: MessageTemplate | null, event: MessageEvent): Preview | null {
   const [out, setOut] = useState<Preview | null>(null);
   const key = JSON.stringify([kind, draft, event]);
   useEffect(() => {
     if (!kind || !draft) return;
     let live = true;
     const timer = window.setTimeout(() => {
-      api<Preview>(`${WEBHOOKS}/preview`, { method: "POST", body: { kind, template: draft, event } }).then(
+      api<Preview>(`${WEBHOOKS}/preview`, { method: "POST", body: { kind, webhookId, template: draft, event } }).then(
         (p) => live && setOut(p),
         (e: Error) => live && setOut((o) => ({ ...(o ?? { kind, body: null }), error: e.message })),
       );

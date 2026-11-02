@@ -187,7 +187,7 @@ Add them on the **Notifications** page. Each one picks its events (down, back up
 Each webhook's **Message** button opens an editor with a live preview (a Discord look-alike for Discord, the raw payload for the others) and a **Send a test** for each event. Everything is per webhook:
 
 - **Texts:** a title and a text for each event (down, back up, back to normal, degraded), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{year}`, `{link}`, `{page}`. Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
-- **Details** listed under the text (target, cause, response time, downtime, project, time) and **buttons** (the monitor in Status, its status page), with their labels.
+- **Details** listed under the text (target, cause, response time, downtime, project, time) and **buttons** (the monitor in Status, and a status page: the monitor's own, or one you pick), with their labels.
 - **Discord:** a mention per event (`<@&role id>`, `<@user id>`, `@here`, `@everyone`; nothing else in a message can ping), the webhook's name and avatar, a thumbnail, the footer, the status emoji and the three colours.
 
 Discord only accepts link buttons to public `https://` addresses, so they're left out while Status runs on localhost.

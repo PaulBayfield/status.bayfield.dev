@@ -954,7 +954,8 @@ a.sidebar-row {
   flex-direction: column;
   gap: 6px;
 }
-.button-option .text-field {
+.button-option .text-field,
+.button-option .button-page {
   margin-left: 24px;
   max-width: 320px;
 }

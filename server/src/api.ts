@@ -435,7 +435,9 @@ api.post("/webhooks/preview", async (c) => {
   const b = await body(c);
   const kind = WEBHOOK_KINDS.includes(b.kind as Webhook["kind"]) ? (b.kind as Webhook["kind"]) : "discord";
   const url = kind === "ntfy" ? "https://ntfy.sh/my-topic" : "https://example.com/webhook";
-  const r = await request({ kind, url, secret: "", template: "" }, testChange(messageEventOf(b.event)), template(b.template));
+  // The webhook being edited, for the projects a test's status page comes from.
+  const w = typeof b.webhookId === "number" ? await first<Webhook>("SELECT projects FROM webhooks WHERE id = ?", b.webhookId) : undefined;
+  const r = await request({ kind, url, secret: "", template: "", projects: w?.projects ?? "" }, testChange(messageEventOf(b.event)), template(b.template));
   // Discord only takes buttons to public https addresses: none from a local Status.
   return c.json({ kind, body: r.preview, buttonsNeedHttps: kind === "discord" && !/^https:\/\/(?!localhost|127\.)/.test(config().publicUrl) });
 });

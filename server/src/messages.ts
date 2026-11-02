@@ -24,7 +24,8 @@ export interface Template {
   /** Empty: the language's default. */
   messages: Record<MessageEvent, { title: string; body: string }>;
   details: Record<Detail, boolean>;
-  buttons: { monitor: { enabled: boolean; label: string }; statusPage: { enabled: boolean; label: string } };
+  /** statusPage.page: a status page's address (slug), or empty for the monitor's own page. */
+  buttons: { monitor: { enabled: boolean; label: string }; statusPage: { enabled: boolean; label: string; page: string } };
   discord: {
     username: string;
     avatarUrl: string;
@@ -85,7 +86,7 @@ export function emptyTemplate(language: Language = "en"): Template {
     language,
     messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
-    buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "" } },
+    buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
       username: "Status",
       avatarUrl: "",
@@ -130,10 +131,11 @@ export function parseTemplate(raw: unknown): Template {
   const details = obj(t.details);
   for (const d of DETAILS) base.details[d] = bool(details[d], base.details[d]);
   const buttons = obj(t.buttons);
-  for (const b of ["monitor", "statusPage"] as const) {
-    const o = obj(buttons[b]);
-    base.buttons[b] = { enabled: bool(o.enabled, base.buttons[b].enabled), label: text(o.label, 80).trim() };
-  }
+  const button = (o: Record<string, unknown>, fallback: boolean) => ({ enabled: bool(o.enabled, fallback), label: text(o.label, 80).trim() });
+  base.buttons.monitor = button(obj(buttons.monitor), base.buttons.monitor.enabled);
+  const sp = obj(buttons.statusPage);
+  const page = text(sp.page, 64).trim().toLowerCase();
+  base.buttons.statusPage = { ...button(sp, base.buttons.statusPage.enabled), page: /^[a-z0-9-]*$/.test(page) ? page : "" };
   const d = obj(t.discord);
   const colors = obj(d.colors);
   const mentions = obj(d.mentions);
@@ -179,15 +181,19 @@ function duration(ms: number, lang: Language): string {
   return `${Math.floor(h / 24)} ${TEXTS[lang].days} ${h % 24} h`;
 }
 
-/** The status pages that show the monitor: the button links to the first (the default one first). */
-async function pageUrl(monitorId: number): Promise<string> {
-  if (!monitorId) return `${config().publicUrl}/status`;
-  const [p] = await all<{ slug: string }>(
-    `SELECT p.slug FROM status_page_monitors l JOIN status_page_groups g ON g.id = l.group_id JOIN status_pages p ON p.id = g.page_id
-     WHERE l.monitor_id = ? ORDER BY p.is_default DESC, p.id LIMIT 1`,
-    monitorId,
-  );
-  return p ? `${config().publicUrl}/status/${p.slug}` : "";
+/** Where the "status page" button and {page} lead: the chosen page; otherwise a page showing the
+ *  monitor (the default one first). A made-up test monitor is on no page: then a page showing
+ *  one of the webhook's monitors, or the default page. */
+async function pageUrl(monitorId: number, chosen: string, projects: number[]): Promise<string> {
+  const url = (slug: string) => `${config().publicUrl}/status/${slug}`;
+  if (chosen && (await all("SELECT 1 AS x FROM status_pages WHERE slug = ?", chosen)).length) return url(chosen);
+  const pages = "FROM status_page_monitors l JOIN status_page_groups g ON g.id = l.group_id JOIN status_pages p ON p.id = g.page_id JOIN monitors m ON m.id = l.monitor_id";
+  const [p] = monitorId
+    ? await all<{ slug: string }>(`SELECT p.slug ${pages} WHERE l.monitor_id = ? ORDER BY p.is_default DESC, p.id LIMIT 1`, monitorId)
+    : projects.length
+      ? await all<{ slug: string }>(`SELECT p.slug ${pages} WHERE m.project_id IN (${projects.map(() => "?").join(",")}) ORDER BY p.is_default DESC, p.id LIMIT 1`, ...projects)
+      : await all<{ slug: string }>("SELECT slug FROM status_pages ORDER BY is_default DESC, id LIMIT 1");
+  return p ? url(p.slug) : "";
 }
 
 async function projectName(projectId: number | null): Promise<string> {
@@ -198,7 +204,8 @@ async function projectName(projectId: number | null): Promise<string> {
 
 type Vars = Record<(typeof PLACEHOLDERS)[number], string>;
 
-async function variables(c: Change, lang: Language, kind: string): Promise<Vars> {
+async function variables(c: Change, t: Template, kind: string, projects: number[]): Promise<Vars> {
+  const lang = t.language;
   const m = c.monitor;
   const L = TEXTS[lang];
   const date = new Date(c.at);
@@ -218,7 +225,7 @@ async function variables(c: Change, lang: Language, kind: string): Promise<Vars>
         ? `<t:${Math.floor(c.at / 1000)}:f>`
         : `${new Intl.DateTimeFormat(lang === "fr" ? "fr-FR" : "en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(date)} UTC`,
     link: `${config().publicUrl}/m/${m.id}`,
-    page: await pageUrl(m.id),
+    page: await pageUrl(m.id, t.buttons.statusPage.page, projects),
     // For a footer like "© {year} bayfield.dev".
     year: String(date.getUTCFullYear()),
   };
@@ -237,10 +244,11 @@ const fill = (s: string, v: Vars) =>
     .trim();
 
 /** Everything a message says, filled in for this change. */
-export async function compose(t: Template, c: Change, kind: string) {
+/** `projects`: the webhook's projects, for a test's status page. */
+export async function compose(t: Template, c: Change, kind: string, projects: number[] = []) {
   const ev = messageEvent(c);
   const L = TEXTS[t.language];
-  const v = await variables(c, t.language, kind);
+  const v = await variables(c, t, kind, projects);
   const msg = t.messages[ev];
   const title = fill(msg.title || L.messages[ev].title, v);
   const body = fill(msg.body || L.messages[ev].body, v);

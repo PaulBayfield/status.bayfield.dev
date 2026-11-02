@@ -198,7 +198,8 @@ export interface MessageTemplate {
   language: "en" | "fr";
   messages: Record<MessageEvent, { title: string; body: string }>;
   details: Record<MessageDetail, boolean>;
-  buttons: { monitor: { enabled: boolean; label: string }; statusPage: { enabled: boolean; label: string } };
+  /** statusPage.page: a status page's slug, or empty for the monitor's own page. */
+  buttons: { monitor: { enabled: boolean; label: string }; statusPage: { enabled: boolean; label: string; page: string } };
   discord: {
     username: string;
     avatarUrl: string;

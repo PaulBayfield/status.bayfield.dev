@@ -39,12 +39,12 @@ export interface Change {
 
 const eventOf = (c: Change): Event => (c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : "up");
 
-type Target = Pick<Webhook, "kind" | "url" | "secret" | "template">;
+type Target = Pick<Webhook, "kind" | "url" | "secret" | "template" | "projects">;
 
 /** The request each kind of webhook expects, from the webhook's message template. */
 export async function request(w: Target, c: Change, template?: Template): Promise<{ url: string; init: RequestInit; preview: unknown }> {
   const t = template ?? storedTemplate(w.template);
-  const m = await compose(t, c, w.kind);
+  const m = await compose(t, c, w.kind, w.projects.split(",").filter(Boolean).map(Number));
   const json = (url: string, body: unknown, extra: Record<string, string> = {}) => ({
     url,
     init: { method: "POST", headers: { "content-type": "application/json", "user-agent": "status.bayfield.dev", ...extra }, body: JSON.stringify(body) },
