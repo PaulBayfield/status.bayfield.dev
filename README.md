@@ -177,12 +177,22 @@ Add them on the **Notifications** page. Each one picks its events (down, back up
 
 | Service | URL | Notes |
 |---|---|---|
-| Discord | Channel → Integrations → Webhooks | A coloured embed with the cause and response time |
-| Slack | Incoming Webhooks | A short message with a link to the monitor |
-| ntfy | `https://ntfy.sh/<topic>` or your own server | Title, tags, priority 5 when down; optional access token |
+| Discord | Channel → Integrations → Webhooks | A [components](https://discord.com/developers/docs/components/overview) message: a container in the event's colour with the title and text, an optional thumbnail, the details, link buttons and a footer |
+| Slack | Incoming Webhooks | A short message with the details and links |
+| ntfy | `https://ntfy.sh/<topic>` or your own server | Title, tags, priority 5 when down, view buttons; optional access token |
 | Webhook (JSON) | Any HTTPS URL | See below |
 
-The JSON webhook POSTs:
+### Customising the messages
+
+Each webhook's **Message** button opens an editor with a live preview (a Discord look-alike for Discord, the raw payload for the others) and a **Send a test** for each event. Everything is per webhook:
+
+- **Texts:** a title and a text for each event (down, back up, back to normal, degraded), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{link}`, `{page}`. Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
+- **Details** listed under the text (target, cause, response time, downtime, project, time) and **buttons** (the monitor in Status, its status page), with their labels.
+- **Discord:** a mention per event (`<@&role id>`, `<@user id>`, `@here`, `@everyone`; nothing else in a message can ping), the webhook's name and avatar, a thumbnail, the footer, the status emoji and the three colours.
+
+Discord only accepts link buttons to public `https://` addresses, so they're left out while Status runs on localhost.
+
+The JSON webhook POSTs (`title`, `message`, `details` and `buttons` come from the webhook's message template):
 
 ```json
 {
@@ -195,7 +205,9 @@ The JSON webhook POSTs:
   "to": "down",
   "downSince": null,
   "monitor": { "id": 3, "name": "API", "type": "http", "target": "https://api.example.com/health", "projectId": 1 },
-  "check": { "status": "down", "latency": 112, "code": 503, "message": "…" }
+  "check": { "status": "down", "latency": 112, "code": 503, "message": "…" },
+  "details": [{ "label": "Target", "value": "https://api.example.com/health" }],
+  "buttons": [{ "label": "Open in Status", "url": "https://status.bayfield.dev/m/3" }]
 }
 ```
 
