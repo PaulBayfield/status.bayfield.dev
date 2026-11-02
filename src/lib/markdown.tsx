@@ -22,7 +22,7 @@ function link(href: string, children: ReactNode, key: number): ReactNode {
   );
 }
 
-function inline(text: string): ReactNode[] {
+export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let key = 0;

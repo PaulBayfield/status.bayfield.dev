@@ -49,7 +49,7 @@ export function Sidebar() {
           <span className="row-label">{t("incidents")}</span>
           <span className="row-meta">{down ? <span className="count-badge">{f.number(down)}</span> : ""}</span>
         </button>
-        <button className={`sidebar-row${route.name === "notifications" ? " active" : ""}`} onClick={() => navigate({ name: "notifications" }, {})}>
+        <button className={`sidebar-row${route.name === "notifications" || route.name === "webhook" ? " active" : ""}`} onClick={() => navigate({ name: "notifications" }, {})}>
           <Bell />
           <span className="row-label">{t("notifications")}</span>
         </button>

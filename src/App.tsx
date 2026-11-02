@@ -14,6 +14,7 @@ import { Overview } from "./components/Overview";
 import { MonitorPage } from "./components/MonitorPage";
 import { IncidentsPage } from "./components/IncidentsPage";
 import { NotificationsPage } from "./components/NotificationsPage";
+import { MessageEditor } from "./components/MessageEditor";
 import { PublicStatus } from "./components/PublicStatus";
 import { PageEditor, StatusPagesPage } from "./components/StatusPagesPage";
 import { SidePanel } from "./components/SidePanel";
@@ -239,7 +240,7 @@ function Shell({ me, setMe, router, onSignedOut }: { me: Me; setMe: (me: Me) => 
       ? (monitorsReq.data?.find((m) => m.id === r.id)?.name ?? t("monitor"))
       : r.name === "incidents"
         ? t("incidents")
-        : r.name === "notifications"
+        : r.name === "notifications" || r.name === "webhook"
           ? t("notifications")
           : r.name === "pages" || r.name === "page"
             ? t("statusPages")
@@ -261,6 +262,7 @@ function Shell({ me, setMe, router, onSignedOut }: { me: Me; setMe: (me: Me) => 
             {r.name === "monitor" && <MonitorPage key={r.id} id={r.id} />}
             {r.name === "incidents" && <IncidentsPage />}
             {r.name === "notifications" && <NotificationsPage />}
+            {r.name === "webhook" && <MessageEditor key={r.id} id={r.id} />}
             {r.name === "pages" && <StatusPagesPage />}
             {r.name === "page" && <PageEditor key={r.id} id={r.id} />}
           </div>

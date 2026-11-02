@@ -208,6 +208,9 @@ const MIGRATIONS: string[] = [
   /* 2: a status page's logo, as a link to an image hosted elsewhere */ `
   ALTER TABLE status_pages ADD COLUMN logo_url text NOT NULL DEFAULT '';
   `,
+  /* 3: what each webhook's messages say and look like (JSON, empty: the defaults) */ `
+  ALTER TABLE webhooks ADD COLUMN template text NOT NULL DEFAULT '';
+  `,
 ];
 
 let migrated: Promise<void> | null = null;

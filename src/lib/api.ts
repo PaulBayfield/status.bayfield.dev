@@ -183,6 +183,35 @@ export interface Webhook {
   enabled: boolean;
   lastSentAt: string | null;
   lastError: string;
+  template: MessageTemplate;
+}
+
+export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded"] as const;
+/** down, back up (after down), back to normal (after degraded), degraded. */
+export type MessageEvent = (typeof MESSAGE_EVENTS)[number];
+export const MESSAGE_DETAILS = ["target", "cause", "latency", "duration", "project", "time"] as const;
+export type MessageDetail = (typeof MESSAGE_DETAILS)[number];
+export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "link", "page"] as const;
+
+/** What a webhook's notifications say and look like. Empty texts: the language's defaults. */
+export interface MessageTemplate {
+  language: "en" | "fr";
+  messages: Record<MessageEvent, { title: string; body: string }>;
+  details: Record<MessageDetail, boolean>;
+  buttons: { monitor: { enabled: boolean; label: string }; statusPage: { enabled: boolean; label: string } };
+  discord: {
+    username: string;
+    avatarUrl: string;
+    thumbnailUrl: string;
+    footer: string;
+    emoji: boolean;
+    colors: Record<"down" | "up" | "degraded", string>;
+    mentions: Record<MessageEvent, string>;
+  };
+}
+
+export interface MessageDefaults {
+  texts: Record<"en" | "fr", { messages: Record<MessageEvent, { title: string; body: string }>; buttons: { monitor: string; statusPage: string }; footer: string; labels: Record<MessageDetail, string> }>;
 }
 
 export interface AdminUser extends Me {

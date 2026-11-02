@@ -6,7 +6,7 @@ import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
 import { useSettings } from "../lib/settings";
 import { ConfirmDialog, Spinner, useToast } from "./common";
-import { Bell, Pencil, Plus, Send, Trash } from "./icons";
+import { Bell, Pencil, Plus, Send, Sliders, Trash } from "./icons";
 import { Switch } from "./settings/common";
 
 export const kindLabel: Record<WebhookKind, string> = { discord: "Discord", slack: "Slack", ntfy: "ntfy", generic: "Webhook (JSON)" };
@@ -15,7 +15,7 @@ export const WEBHOOKS = "/app/webhooks";
 
 export function NotificationsPage() {
   const { t, f } = useSettings();
-  const { me, edit, projects } = useApp();
+  const { me, edit, projects, navigate } = useApp();
   const toast = useToast();
   const hooks = useApi<Webhook[]>(WEBHOOKS, true);
   const [deleting, setDeleting] = useState<Webhook | null>(null);
@@ -100,6 +100,10 @@ export function NotificationsPage() {
                   <button className="text-button" disabled={testing === w.id} onClick={() => void test(w)}>
                     {testing === w.id ? <Spinner /> : <Send size={14} />}
                     <span className="hide-mobile">{t("sendTest")}</span>
+                  </button>
+                  <button className="text-button" title={t("customizeMessage")} onClick={() => navigate({ name: "webhook", id: w.id }, {})}>
+                    <Sliders size={14} />
+                    <span className="hide-mobile">{t("messageButton")}</span>
                   </button>
                   <button className="icon-button" title={t("edit")} aria-label={t("edit")} onClick={() => edit({ kind: "webhook", webhook: w })}>
                     <Pencil />

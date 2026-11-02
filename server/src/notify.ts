@@ -1,9 +1,9 @@
 // Webhook notifications: Discord, Slack, ntfy, or any URL (signed JSON).
 
 import { all, run } from "./db.ts";
-import { config } from "./config.ts";
 import { hmacSha256 } from "./crypto.ts";
 import type { Monitor, Outcome, Result, Status } from "./checks.ts";
+import { compose, discordBody, discordUrl, ntfyRequest, slackText, storedTemplate, type MessageEvent, type Template } from "./messages.ts";
 
 export const WEBHOOK_KINDS = ["discord", "slack", "ntfy", "generic"] as const;
 export type WebhookKind = (typeof WEBHOOK_KINDS)[number];
@@ -21,6 +21,8 @@ export interface Webhook {
   enabled: number;
   lastSentAt: number | null;
   lastError: string;
+  /** The message template, as JSON (empty: the defaults). */
+  template: string;
   createdAt: number;
 }
 
@@ -37,92 +39,62 @@ export interface Change {
 
 const eventOf = (c: Change): Event => (c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : "up");
 
-/** "3 h 12 min" */
-export function duration(ms: number): string {
-  const min = Math.max(1, Math.round(ms / 60_000));
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 48) return `${h} h${min % 60 ? ` ${min % 60} min` : ""}`;
-  return `${Math.floor(h / 24)} days ${h % 24} h`;
-}
+type Target = Pick<Webhook, "kind" | "url" | "secret" | "template">;
 
-function text(c: Change) {
-  const m = c.monitor;
-  const ev = eventOf(c);
-  const title =
-    ev === "down" ? `${m.name} is down` : ev === "degraded" ? `${m.name} is degraded` : c.from === "degraded" ? `${m.name} is back to normal` : `${m.name} is back up`;
-  const detail =
-    ev === "up" && c.downSince ? `Down for ${duration(c.at - c.downSince)}. ${c.result.message}` : c.result.message;
-  return { title, detail, link: `${config().publicUrl}/m/${m.id}`, target: m.type === "heartbeat" ? "Heartbeat" : m.target };
-}
-
-/** The request each kind of webhook expects. */
-async function request(w: Pick<Webhook, "kind" | "url" | "secret">, c: Change): Promise<RequestInit> {
-  const ev = eventOf(c);
-  const { title, detail, link, target } = text(c);
-  const json = (body: unknown, extra: Record<string, string> = {}) => ({
-    method: "POST",
-    headers: { "content-type": "application/json", "user-agent": "status.bayfield.dev", ...extra },
-    body: JSON.stringify(body),
+/** The request each kind of webhook expects, from the webhook's message template. */
+export async function request(w: Target, c: Change, template?: Template): Promise<{ url: string; init: RequestInit; preview: unknown }> {
+  const t = template ?? storedTemplate(w.template);
+  const m = await compose(t, c, w.kind);
+  const json = (url: string, body: unknown, extra: Record<string, string> = {}) => ({
+    url,
+    init: { method: "POST", headers: { "content-type": "application/json", "user-agent": "status.bayfield.dev", ...extra }, body: JSON.stringify(body) },
+    preview: body,
   });
   switch (w.kind) {
     case "discord":
-      return json({
-        username: "Status",
-        embeds: [
-          {
-            title: `${ev === "down" ? "🔴" : ev === "degraded" ? "🟡" : "🟢"} ${title}`,
-            description: detail,
-            url: link,
-            color: ev === "down" ? 0xe5484d : ev === "degraded" ? 0xf5a524 : 0x30a46c,
-            fields: [
-              { name: "Target", value: target, inline: true },
-              ...(c.result.latency !== null ? [{ name: "Response", value: `${c.result.latency} ms`, inline: true }] : []),
-            ],
-            timestamp: new Date(c.at).toISOString(),
-          },
-        ],
-      });
+      return json(discordUrl(w.url), discordBody(t, m));
     case "slack":
-      return json({ text: `${ev === "down" ? ":red_circle:" : ev === "degraded" ? ":large_yellow_circle:" : ":large_green_circle:"} *${title}*\n${detail}\n<${link}|Open in Status> · ${target}` });
-    case "ntfy":
-      return {
-        method: "POST",
-        headers: {
-          Title: title,
-          Tags: ev === "down" ? "rotating_light" : ev === "degraded" ? "warning" : "white_check_mark",
-          Priority: ev === "down" ? "5" : "3",
-          Click: link,
-          ...(w.secret ? { Authorization: `Bearer ${w.secret}` } : {}),
-        },
-        body: `${detail}\n${target}`,
-      };
+      return json(w.url, { text: slackText(m) });
+    case "ntfy": {
+      const r = ntfyRequest(w.url, m);
+      return json(r.url, r.body, w.secret ? { Authorization: `Bearer ${w.secret}` } : {});
+    }
     case "generic": {
-      const body = JSON.stringify({
+      const ev = eventOf(c);
+      const payload = {
         event: ev,
-        title,
-        message: detail,
-        url: link,
+        title: m.title,
+        message: m.body,
+        url: m.vars.link,
         at: new Date(c.at).toISOString(),
         from: c.from,
         to: c.to,
         downSince: c.downSince ? new Date(c.downSince).toISOString() : null,
         monitor: { id: c.monitor.id, name: c.monitor.name, type: c.monitor.type, target: c.monitor.target, projectId: c.monitor.projectId },
         check: c.result,
-      });
+        details: m.details,
+        buttons: m.buttons,
+      };
+      const body = JSON.stringify(payload);
       const headers: Record<string, string> = { "content-type": "application/json", "user-agent": "status.bayfield.dev", "x-status-event": ev };
       if (w.secret) headers["x-status-signature"] = `sha256=${await hmacSha256(w.secret, body)}`;
-      return { method: "POST", headers, body };
+      return { url: w.url, init: { method: "POST", headers, body }, preview: payload };
     }
   }
 }
 
 /** Sends one notification; returns the error, if any. */
-export async function send(w: Pick<Webhook, "kind" | "url" | "secret">, c: Change): Promise<string | null> {
+export async function send(w: Target, c: Change, template?: Template): Promise<string | null> {
   try {
-    const res = await fetch(w.url, { ...(await request(w, c)), signal: AbortSignal.timeout(10_000) });
-    await res.body?.cancel();
-    return res.ok ? null : `Answered ${res.status}`;
+    const r = await request(w, c, template);
+    const res = await fetch(r.url, { ...r.init, signal: AbortSignal.timeout(10_000) });
+    if (res.ok) {
+      await res.body?.cancel();
+      return null;
+    }
+    // Discord and Slack say what they didn't like: worth showing next to the webhook.
+    const why = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+    return `Answered ${res.status}${why ? `: ${why}` : ""}`;
   } catch (e) {
     return (e as Error).message || "Request failed";
   }
@@ -149,22 +121,18 @@ export async function notify(changes: Change[]) {
   }
 }
 
-/** The "Send a test" button: a made-up outage of a made-up monitor. */
-export function testChange(): Change {
+/** The "Send a test" button and the editor's preview: a made-up change of a made-up monitor. */
+export function testChange(event: MessageEvent = "down", monitor?: Partial<Monitor>): Change {
   const now = Date.now();
+  const to = event === "down" ? "down" : event === "degraded" ? "degraded" : "up";
+  const from = event === "normal" ? "degraded" : event === "up" ? "down" : "up";
+  const message = { down: "Answered 503 Service Unavailable, expected 200-299", degraded: "Slow: 2340 ms (over 1500 ms)", up: "200 OK", normal: "200 OK" }[event];
   return {
-    monitor: {
-      id: 0,
-      projectId: null,
-      name: "Test monitor",
-      type: "http",
-      target: "https://example.com",
-      status: "down",
-    } as Monitor,
-    from: "up",
-    to: "down",
-    result: { status: "down", latency: null, code: 503, message: "This is a test notification from Status." },
+    monitor: { id: 0, projectId: null, name: "Example API", type: "http", target: "https://api.example.com/health", status: to, ...monitor } as Monitor,
+    from,
+    to,
+    result: { status: to, latency: event === "down" ? 112 : event === "degraded" ? 2340 : 84, code: event === "down" ? 503 : 200, message },
     at: now,
-    downSince: null,
+    downSince: event === "up" ? now - 47 * 60_000 : null,
   };
 }

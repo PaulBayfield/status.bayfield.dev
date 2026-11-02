@@ -7,7 +7,8 @@ import { randomToken, sha256 } from "./crypto.ts";
 import { HttpError, bad, body, id, int, rateLimit, str } from "./http.ts";
 import { requireAdmin, requireCollaborator, requireUser, signOutEverywhere, type AppEnv } from "./auth.ts";
 import { checkNow, parseHostPort, type Monitor, type MonitorType } from "./checks.ts";
-import { EVENTS, WEBHOOK_KINDS, notify, send, testChange, type Webhook } from "./notify.ts";
+import { EVENTS, WEBHOOK_KINDS, notify, request, send, testChange, type Webhook } from "./notify.ts";
+import { DETAILS, LANGUAGES, MESSAGE_EVENTS, PLACEHOLDERS, TemplateError, defaultTexts, parseTemplate, storedTemplate, type MessageEvent } from "./messages.ts";
 import { daysByMonitor, monitorView, uptime } from "./views.ts";
 import { updateStatus } from "./updates.ts";
 import { listPages, pageRoutes, pagesByMonitor } from "./pages.ts";
@@ -349,7 +350,17 @@ const webhookView = (w: Webhook) => ({
   enabled: !!w.enabled,
   lastSentAt: iso(w.lastSentAt),
   lastError: w.lastError,
+  template: storedTemplate(w.template),
 });
+
+const template = (v: unknown) => {
+  try {
+    return parseTemplate(v);
+  } catch (e) {
+    if (e instanceof TemplateError) throw bad(e.message);
+    throw e;
+  }
+};
 
 function parseWebhook(b: Record<string, unknown>, old?: Webhook) {
   const name = str(b.name ?? old?.name, 80);
@@ -367,7 +378,8 @@ function parseWebhook(b: Record<string, unknown>, old?: Webhook) {
   // An empty secret field keeps the old one; `clearSecret` removes it.
   const secret = b.clearSecret ? "" : str(b.secret, 200) || old?.secret || "";
   const enabled = b.enabled === undefined ? (old ? !!old.enabled : true) : !!b.enabled;
-  return { name, kind, url, events, projects, secret, enabled };
+  const tpl = b.template !== undefined ? JSON.stringify(template(b.template)) : (old?.template ?? "");
+  return { name, kind, url, events, projects, secret, enabled, template: tpl };
 }
 
 api.get("/webhooks", async (c) => c.json((await all<Webhook>("SELECT * FROM webhooks ORDER BY lower(name)")).map(webhookView)));
@@ -375,7 +387,7 @@ api.get("/webhooks", async (c) => c.json((await all<Webhook>("SELECT * FROM webh
 api.post("/webhooks", requireCollaborator, async (c) => {
   const v = parseWebhook(await body(c));
   const { id: wid } = await run(
-    "INSERT INTO webhooks (name, kind, url, secret, events, projects, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO webhooks (name, kind, url, secret, events, projects, enabled, template, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     v.name,
     v.kind,
     v.url,
@@ -383,6 +395,7 @@ api.post("/webhooks", requireCollaborator, async (c) => {
     v.events,
     v.projects,
     v.enabled,
+    v.template,
     Date.now(),
   );
   return c.json(webhookView((await first<Webhook>("SELECT * FROM webhooks WHERE id = ?", wid))!), 201);
@@ -392,7 +405,18 @@ api.patch("/webhooks/:id", requireCollaborator, async (c) => {
   const old = await first<Webhook>("SELECT * FROM webhooks WHERE id = ?", id(c));
   if (!old) throw new HttpError(404, "Not found");
   const v = parseWebhook(await body(c), old);
-  await run("UPDATE webhooks SET name = ?, kind = ?, url = ?, secret = ?, events = ?, projects = ?, enabled = ? WHERE id = ?", v.name, v.kind, v.url, v.secret, v.events, v.projects, v.enabled, old.id);
+  await run(
+    "UPDATE webhooks SET name = ?, kind = ?, url = ?, secret = ?, events = ?, projects = ?, enabled = ?, template = ? WHERE id = ?",
+    v.name,
+    v.kind,
+    v.url,
+    v.secret,
+    v.events,
+    v.projects,
+    v.enabled,
+    v.template,
+    old.id,
+  );
   return c.json(webhookView((await first<Webhook>("SELECT * FROM webhooks WHERE id = ?", old.id))!));
 });
 
@@ -401,12 +425,28 @@ api.delete("/webhooks/:id", requireCollaborator, async (c) => {
   return c.body(null, 204);
 });
 
-/** Sends a made-up outage, to see it arrive. */
+/** The message editor's defaults: texts per language, placeholders, events and details. */
+api.get("/webhooks/defaults", (c) => c.json({ texts: defaultTexts(), placeholders: PLACEHOLDERS, events: MESSAGE_EVENTS, details: DETAILS, languages: LANGUAGES }));
+
+const messageEventOf = (v: unknown): MessageEvent => (MESSAGE_EVENTS.includes(v as MessageEvent) ? (v as MessageEvent) : "down");
+
+/** What a template sends for an event, without sending it: the editor's live preview. */
+api.post("/webhooks/preview", async (c) => {
+  const b = await body(c);
+  const kind = WEBHOOK_KINDS.includes(b.kind as Webhook["kind"]) ? (b.kind as Webhook["kind"]) : "discord";
+  const url = kind === "ntfy" ? "https://ntfy.sh/my-topic" : "https://example.com/webhook";
+  const r = await request({ kind, url, secret: "", template: "" }, testChange(messageEventOf(b.event)), template(b.template));
+  // Discord only takes buttons to public https addresses: none from a local Status.
+  return c.json({ kind, body: r.preview, buttonsNeedHttps: kind === "discord" && !/^https:\/\/(?!localhost|127\.)/.test(config().publicUrl) });
+});
+
+/** Sends a made-up change, to see it arrive: of the saved message, or of the editor's draft. */
 api.post("/webhooks/:id/test", requireCollaborator, async (c) => {
   rateLimit(c, "webhook-test", 10, 60_000);
   const w = await first<Webhook>("SELECT * FROM webhooks WHERE id = ?", id(c));
   if (!w) throw new HttpError(404, "Not found");
-  const error = await send(w, testChange());
+  const b = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+  const error = await send(w, testChange(messageEventOf(b.event)), b.template !== undefined ? template(b.template) : undefined);
   await run("UPDATE webhooks SET last_sent_at = ?, last_error = ? WHERE id = ?", Date.now(), error ?? "", w.id);
   if (error) throw bad(`The webhook failed: ${error}`);
   return c.json({ ok: true });
@@ -472,7 +512,7 @@ api.get("/export", async (c) => {
       degradedMs: m.degradedMs,
       paused: !!m.paused,
     })),
-    webhooks: webhooks.map((w) => ({ name: w.name, kind: w.kind, events: w.events, projects: w.projects, enabled: !!w.enabled })),
+    webhooks: webhooks.map((w) => ({ name: w.name, kind: w.kind, events: w.events, projects: w.projects, enabled: !!w.enabled, template: storedTemplate(w.template) })),
     statusPages: await listPages(),
   });
 });
