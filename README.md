@@ -58,10 +58,11 @@ Key features:
 - **Fewer false alarms:** a monitor only counts as down after N failed checks in a row (2 by default), and can be marked **degraded** when it answers slower than a threshold
 - **Projects:** group monitors by site, app or server, each with a colour; filter the overview by project or status
 - **Overview:** an overall banner (all operational / N down), tiles (up, down, 30-day uptime, average response), and every monitor with its last 45 days of bars, uptime and response time
-- **Monitor page:** uptime over 24 h, 7, 30 and 90 days, a response time chart (24 h / 7 / 30 days, with failures marked along the baseline), the 90-day bars, its incidents and recent checks. Check now, pause, edit, delete
+- **Monitor page:** uptime over 24 h, 7, 30 and 90 days, a response time chart (24 h / 7 / 30 days: the mean as a line and the min–max of each period as a band, both toggleable, min / mean / max on hover, failures marked along the baseline), the 90-day bars, its incidents and recent checks. Check now, pause, edit, delete
+- **SSL certificates and domains:** HTTP monitors can watch their certificate (read from the server's TLS handshake, or from the Certificate Transparency logs when the host is behind Cloudflare) and their domain's registration (RDAP). The monitor page shows until when, the issuer or registrar and the days left; the overview flags the ones close to expiry; a notification goes out when one gets within N days (14 by default), 3 days before, and when it expires
 - **Incidents:** opened when a monitor goes down, closed when it's back, with the cause and how long it lasted
-- **Webhook notifications** to Discord, Slack, ntfy or any URL (signed JSON), on down / back up / degraded, for all monitors or chosen projects, with a "Send a test" button
-- **Status pages**, like Uptime Kuma's: as many as you like, each at its own address (`/status/croustillant`) with a title, a description, an optional logo (a link to an image hosted elsewhere) and named groups of monitors in the order you choose (or one group per project in a click). One is the default page, also shown at `/status` and at `/` to visitors. Visitors see names, status, 90-day bars and the last week's incidents, never URLs or error details. Plus shields-style badges at `/api/public/badge/<id>` for monitors shown on a page
+- **Webhook notifications** to Discord, Slack, ntfy or any URL (signed JSON), on down / back up / degraded / certificate or domain expiry, for all monitors or chosen projects, with a "Send a test" button
+- **Status pages**, like Uptime Kuma's: as many as you like, each at its own address (`/status/croustillant`) with a title, a description, an optional logo (a link to an image hosted elsewhere) and named groups of monitors in the order you choose (or one group per project in a click). One is the default page, also shown at `/status` and at `/` to visitors. Visitors see names, status, 90-day bars and the last week's incidents, never URLs or error details. Each page chooses what it shows: summary tiles, uptime bars, incidents, and response time charts (hidden, a button on each monitor, or open) Plus shields-style badges at `/api/public/badge/<id>` for monitors shown on a page
 - **The shared shell:** collapsible, resizable sidebar; activity side panel; command palette (`Ctrl+K`); settings with 5 themes (System, Light, Dark, Rosé Pine, Rosé Pine Dawn); English and French; update check in **Settings → About**; phone layout
 
 
@@ -186,7 +187,7 @@ Add them on the **Notifications** page. Each one picks its events (down, back up
 
 Each webhook's **Message** button opens an editor with a live preview (a Discord look-alike for Discord, the raw payload for the others) and a **Send a test** for each event. Everything is per webhook:
 
-- **Texts:** a title and a text for each event (down, back up, back to normal, degraded), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{year}`, `{link}`, `{page}`. Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
+- **Texts:** a title and a text for each event (down, back up, back to normal, degraded, expiring), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{year}`, `{link}`, `{page}`, and for expiry warnings `{what}`, `{name}`, `{expires}`, `{days}`, `{expiry}`, `{issuer}`. Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
 - **Details** listed under the text (target, cause, response time, downtime, project, time) and **buttons** (the monitor in Status, and a status page: the monitor's own, or one you pick), with their labels.
 - **Discord:** a mention per event (`<@&role id>`, `<@user id>`, `@here`, `@everyone`; nothing else in a message can ping), the webhook's name and avatar, a thumbnail, the footer, the status emoji and the three colours.
 
@@ -297,6 +298,7 @@ Limits to know:
 - **Plan:** each check writes three rows (the check, the day's summary, the monitor). The free plan's 100,000 rows written a day fits about 10 monitors at a 1-minute interval (more at longer intervals); Workers Paid ($5/month) covers hundreds
 - **Per run:** up to 30 checks per minute, 6 at a time (the Workers connection limit, so queued requests don't skew timings). More due monitors wait for the next minute
 - **TCP checks** can't reach hosts behind Cloudflare's proxy (use the origin's address) or port 25
+- **Certificates** behind Cloudflare's proxy (or on TLS 1.3-only servers) come from the Certificate Transparency logs ([Cert Spotter](https://sslmate.com/certspotter/), then [crt.sh](https://crt.sh)): the certificate issued last, which is the one served unless a renewal wasn't deployed
 - **One location:** checks come from wherever Cloudflare runs the cron, not several regions
 
 
