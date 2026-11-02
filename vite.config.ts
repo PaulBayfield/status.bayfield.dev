@@ -13,6 +13,8 @@ export default defineConfig({
     // The Worker (npm run server: wrangler dev) during development.
     proxy: {
       "/api": "http://127.0.0.1:8820",
+      // The status page widget is served by the Worker too.
+      "/embed": "http://127.0.0.1:8820",
     },
     watch: {
       ignored: ["**/server/**"],
