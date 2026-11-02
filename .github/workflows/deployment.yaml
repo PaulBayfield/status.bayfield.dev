@@ -1,0 +1,55 @@
+name: Production Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # create the release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Extract version from package.json
+        id: get_version
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web app
+        run: npm ci && npm run build
+
+      - name: Install the Worker's dependencies
+        run: npm ci
+        working-directory: server
+
+      # Needs the CLOUDFLARE_API_TOKEN (template "Edit Cloudflare Workers", plus D1 edit) and
+      # CLOUDFLARE_ACCOUNT_ID repository secrets.
+      - name: Deploy to Cloudflare
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --var APP_VERSION:${{ steps.get_version.outputs.version }}
+
+      # Settings → About compares the running version with the latest release, so publish one
+      # whenever package.json's version changes (once it's deployed).
+      - name: Publish a GitHub release for a new version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.get_version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi

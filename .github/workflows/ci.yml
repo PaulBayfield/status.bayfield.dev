@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      # Type-checks (tsc) and builds the web app.
+      - run: npm run build
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+      - run: npm run check
+        working-directory: server
+
+  # Bundles the Worker without uploading it: catches what tsc doesn't (imports, wrangler.jsonc).
+  worker-build:
+    runs-on: ubuntu-latest
+    needs: [web, server]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - run: npm ci && npm run build
+      - run: npm ci && npx wrangler deploy --dry-run --outdir /tmp/worker
+        working-directory: server

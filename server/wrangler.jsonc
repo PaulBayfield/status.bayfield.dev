@@ -1,0 +1,48 @@
+// The Cloudflare Worker: the API, the checks (a cron trigger every minute) and the web build.
+// Secrets (OIDC_CLIENT_SECRET) are set with `wrangler secret put`; locally they go in .dev.vars.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "status-bayfield-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The web build (npm run build in the project root). The Worker runs first on every request,
+  // so pages get the same security headers as the API.
+  "assets": {
+    "directory": "../dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+
+  // `wrangler d1 create status`, then paste its database_id here.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "status",
+      "database_id": "3b38a178-8534-403a-afdd-598c2201d93a"
+    }
+  ],
+
+  // Every minute: run the checks that are due, then notify webhooks of any change.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  // Serve on status.bayfield.dev (the zone must be on this Cloudflare account).
+  "routes": [{ "pattern": "status.bayfield.dev", "custom_domain": true }],
+
+  "observability": { "enabled": true },
+
+  // `npm run dev`: the API on :8820 (Vite proxies /api to it from :1460).
+  "dev": { "port": 8820, "ip": "127.0.0.1" },
+
+  // Non-secret configuration (see .dev.vars.example for every option).
+  "vars": {
+    "PUBLIC_URL": "https://status.bayfield.dev",
+    "OIDC_NAME": "Authentik",
+    "OIDC_ISSUER": "https://auth.bayfield.dev/application/o/status/",
+    "OIDC_CLIENT_ID": "ykEEzSTuRYosbcJ6lpKb3tQ9zTOYX1Xl9yzyI5D2"
+  }
+}

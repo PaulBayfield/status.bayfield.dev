@@ -1,0 +1,27 @@
+{
+  "name": "status-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Status API, checks and static host, as a Cloudflare Worker",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/ensure-dist.ts && wrangler dev --test-scheduled",
+    "start": "npm run dev",
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "seed": "wrangler d1 execute status --local --file=scripts/seed.sql",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "@types/node": "^26.6.5",
+    "typescript": "~7.0.2",
+    "wrangler": "^4.156.2"
+  }
+}

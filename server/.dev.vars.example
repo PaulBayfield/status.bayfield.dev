@@ -1,0 +1,39 @@
+# Copy to server/.dev.vars for `npm run dev` (wrangler reads it like a .env file).
+# In production, plain options go in wrangler.jsonc "vars" and secrets via `wrangler secret put NAME`.
+
+# Where Status is reachable (OIDC redirect, links in notifications).
+PUBLIC_URL=http://localhost:8820
+
+# --- Sign in with Authentik (any OIDC provider works): the only way in, required ---
+# Authentik: Applications → Providers → OAuth2/OpenID, confidential client,
+# redirect URI ${PUBLIC_URL}/api/auth/oidc/callback, scopes openid profile email.
+# The issuer is the provider's "OpenID Configuration Issuer", e.g. https://auth.example.com/application/o/status/
+# wrangler.jsonc sets these for production; locally they're blanked so the development
+# sign-in is used. Fill them in (and OIDC_CLIENT_SECRET) to try Authentik locally.
+OIDC_ISSUER=
+# OIDC_CLIENT_ID=
+# OIDC_CLIENT_SECRET=          (production: wrangler secret put OIDC_CLIENT_SECRET)
+# OIDC_NAME=Authentik
+# Create accounts on first sign-in (default true). Set false to only let in users an admin created.
+# OIDC_AUTO_CREATE=true
+# Comma-separated Authentik groups allowed in (empty: anyone the provider lets through).
+# OIDC_ALLOWED_GROUPS=
+# Members of these groups are admins, checked at every sign-in.
+# OIDC_ADMIN_GROUPS=
+# Role of accounts created on first sign-in: viewer (read-only, default) or collaborator
+# (manages monitors and webhooks). The very first account is an admin.
+# OIDC_DEFAULT_ROLE=viewer
+
+# Local development without Authentik: sign straight in as this user (created if missing).
+# Only honoured when PUBLIC_URL is http://localhost; leave unset everywhere else.
+DEV_LOGIN_USER=demo
+# Idle days before a session expires.
+# SESSION_IDLE_DAYS=30
+
+# Days of raw checks to keep (response time charts, 24 h uptime). The daily summaries behind the
+# 90-day bars are kept for a year either way.
+# RETENTION_DAYS=30
+
+
+# Look on GitHub for a newer release, shown in Settings → About (cached for 6 hours).
+# UPDATE_CHECK=true
