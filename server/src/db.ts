@@ -234,6 +234,63 @@ const MIGRATIONS: string[] = [
   -- JSON: uptime bars, tiles, incidents, response time charts. Empty: the defaults.
   ALTER TABLE status_pages ADD COLUMN display text NOT NULL DEFAULT '';
   `,
+  /* 5: custom domains, incident posts, maintenance windows */ `
+  -- A host name (status.example.com) that serves this page at /. Empty: none.
+  ALTER TABLE status_pages ADD COLUMN domain text NOT NULL DEFAULT '';
+  CREATE UNIQUE INDEX status_pages_domain ON status_pages(domain) WHERE domain <> '';
+
+  -- Incident posts written by a person, shown on chosen status pages with their updates.
+  CREATE TABLE posts (
+    id integer PRIMARY KEY AUTOINCREMENT,
+    title text NOT NULL,
+    impact text NOT NULL DEFAULT 'minor' CHECK (impact IN ('none', 'minor', 'major')),
+    status text NOT NULL DEFAULT 'investigating' CHECK (status IN ('investigating', 'identified', 'monitoring', 'resolved')),
+    author text NOT NULL DEFAULT '',
+    created_at integer NOT NULL,
+    updated_at integer NOT NULL,
+    resolved_at integer
+  );
+  CREATE INDEX posts_created ON posts(created_at);
+  CREATE TABLE post_updates (
+    id integer PRIMARY KEY AUTOINCREMENT,
+    post_id integer NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    status text NOT NULL CHECK (status IN ('investigating', 'identified', 'monitoring', 'resolved')),
+    body text NOT NULL DEFAULT '',
+    author text NOT NULL DEFAULT '',
+    created_at integer NOT NULL
+  );
+  CREATE INDEX post_updates_post ON post_updates(post_id, created_at);
+  CREATE TABLE post_pages (
+    post_id integer NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    page_id integer NOT NULL REFERENCES status_pages(id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, page_id)
+  );
+  -- The monitors it affects (shown as such on the pages).
+  CREATE TABLE post_monitors (
+    post_id integer NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    monitor_id integer NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    PRIMARY KEY (post_id, monitor_id)
+  );
+
+  -- Planned maintenance: the monitors aren't checked (nor alerted on) during the window, and the
+  -- pages that show them announce it.
+  CREATE TABLE maintenances (
+    id integer PRIMARY KEY AUTOINCREMENT,
+    title text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    starts_at integer NOT NULL,
+    ends_at integer NOT NULL,
+    author text NOT NULL DEFAULT '',
+    created_at integer NOT NULL
+  );
+  CREATE INDEX maintenances_window ON maintenances(ends_at, starts_at);
+  CREATE TABLE maintenance_monitors (
+    maintenance_id integer NOT NULL REFERENCES maintenances(id) ON DELETE CASCADE,
+    monitor_id integer NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+    PRIMARY KEY (maintenance_id, monitor_id)
+  );
+  CREATE INDEX maintenance_monitors_monitor ON maintenance_monitors(monitor_id);
+  `,
 ];
 
 let migrated: Promise<void> | null = null;

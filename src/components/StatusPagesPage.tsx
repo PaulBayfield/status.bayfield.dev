@@ -7,7 +7,7 @@ import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
 import { Markdown } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
-import { Spinner, useToast } from "./common";
+import { CopyButton, Spinner, useToast } from "./common";
 import { MonitorTypeIcon } from "./MonitorPage";
 import { PAGES } from "./SidePanel";
 import { PageLogo } from "./PublicStatus";
@@ -266,6 +266,8 @@ export function PageEditor({ id }: { id: number }) {
         </div>
       )}
 
+      <ShareCard page={p} />
+
       {dirty && (
         <div className="save-bar" role="status">
           <span>{t("unsavedChanges")}</span>
@@ -314,5 +316,102 @@ function EditorRow({ m, editor, first, last, onMove, onRemove }: { m: Monitor; e
         </div>
       )}
     </div>
+  );
+}
+
+// --- Share & embed ---
+
+function Snippet({ label, code }: { label: string; code: string }) {
+  return (
+    <div className="snippet">
+      <span className="form-label">{label}</span>
+      <div className="snippet-code">
+        <code>{code}</code>
+        <CopyButton text={code} />
+      </div>
+    </div>
+  );
+}
+
+/** The page's badge, its widget (an iframe) and each monitor's badges, ready to paste elsewhere. */
+function ShareCard({ page }: { page: StatusPage }) {
+  const { t } = useSettings();
+  const { monitors } = useApp();
+  const base = location.origin;
+  const pageLink = page.domain ? `https://${page.domain}` : `${base}/status/${page.slug}`;
+  const [theme, setTheme] = useState<"auto" | "light" | "dark">("auto");
+  const [lang, setLang] = useState<"en" | "fr">("en");
+  const [list, setList] = useState(false);
+  const shown = [...new Set(page.groups.flatMap((g) => g.monitors))].map((mid) => monitors?.find((m) => m.id === mid)).filter((m): m is Monitor => !!m);
+  const [monitorId, setMonitorId] = useState<number | null>(null);
+  const [kind, setKind] = useState<"status" | "uptime" | "response">("status");
+  const mid = monitorId ?? shown[0]?.id ?? null;
+
+  const params = new URLSearchParams({ ...(theme !== "auto" ? { theme } : {}), ...(lang !== "en" ? { lang } : {}), ...(list ? { monitors: "1" } : {}) }).toString();
+  const widget = `${base}/embed/${page.slug}${params ? `?${params}` : ""}`;
+  const height = list ? 72 + 31 * Math.min(shown.length, 12) + 14 : 72;
+  const pageBadge = `${base}/api/public/pages/${page.slug}/badge`;
+  const monitorBadge = mid === null ? "" : `${base}/api/public/badge/${mid}${kind === "uptime" ? "/uptime?days=30" : kind === "response" ? "/response" : ""}`;
+
+  return (
+    <section className="card share-card">
+      <div className="card-header">
+        <h3>{t("shareTitle")}</h3>
+      </div>
+      <p className="form-hint">{t("shareHint")}</p>
+
+      <div className="share-block">
+        <h4>{t("sharePageBadge")}</h4>
+        <img className="badge-image" src={pageBadge} alt="" />
+        <Snippet label="Markdown" code={`[![${page.title}](${pageBadge})](${pageLink})`} />
+        <Snippet label="HTML" code={`<a href="${pageLink}"><img src="${pageBadge}" alt="${page.title}"></a>`} />
+      </div>
+
+      <div className="share-block">
+        <h4>{t("shareWidget")}</h4>
+        <div className="share-options">
+          <select value={theme} aria-label={t("theme")} onChange={(e) => setTheme(e.target.value as typeof theme)}>
+            <option value="auto">{t("widgetThemeAuto")}</option>
+            <option value="light">{t("widgetThemeLight")}</option>
+            <option value="dark">{t("widgetThemeDark")}</option>
+          </select>
+          <select value={lang} aria-label={t("language")} onChange={(e) => setLang(e.target.value as typeof lang)}>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+          </select>
+          <label className="checkbox">
+            <input type="checkbox" checked={list} onChange={(e) => setList(e.target.checked)} />
+            {t("widgetListMonitors")}
+          </label>
+        </div>
+        <iframe className="widget-preview" src={widget} title={page.title} height={height} />
+        <Snippet label="HTML" code={`<iframe src="${widget}" width="360" height="${height}" style="border:0" title="${page.title}"></iframe>`} />
+      </div>
+
+      {shown.length > 0 && mid !== null && (
+        <div className="share-block">
+          <h4>{t("shareMonitorBadges")}</h4>
+          <div className="share-options">
+            <select value={mid} aria-label={t("monitor")} onChange={(e) => setMonitorId(Number(e.target.value))}>
+              {shown.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <div className="segmented">
+              {(["status", "uptime", "response"] as const).map((k) => (
+                <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
+                  {t(`badge_${k}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <img className="badge-image" src={monitorBadge} alt="" />
+          <Snippet label="Markdown" code={`[![${shown.find((m) => m.id === mid)?.name ?? ""}](${monitorBadge})](${pageLink})`} />
+          {kind === "uptime" && <span className="form-hint">{t("badgeUptimeHint")}</span>}
+        </div>
+      )}
+    </section>
   );
 }

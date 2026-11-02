@@ -4,9 +4,12 @@
 import { Hono } from "hono";
 import { all, batch, first, run, type Param } from "./db.ts";
 import { HttpError, bad, body, id, str } from "./http.ts";
+import { config } from "./config.ts";
 import { requireCollaborator, type AppEnv } from "./auth.ts";
 import type { Monitor } from "./checks.ts";
 import { daysByMonitor, latencySeries, publicMonitorView } from "./views.ts";
+import { maintenancesFor } from "./maintenance.ts";
+import { postsFor } from "./posts.ts";
 import { forgetPages } from "./public.ts";
 
 interface PageRow {
@@ -16,6 +19,7 @@ interface PageRow {
   description: string;
   logoUrl: string;
   display: string;
+  domain: string;
   isDefault: number;
   createdAt: number;
   updatedAt: number;
@@ -86,6 +90,7 @@ const pageView = (p: PageRow, groups: PageGroup[]) => ({
   description: p.description,
   logoUrl: p.logoUrl,
   display: storedDisplay(p.display),
+  domain: p.domain,
   isDefault: !!p.isDefault,
   groups,
   updatedAt: new Date(p.updatedAt).toISOString(),
@@ -115,11 +120,29 @@ export async function publicSeries(slug: string, monitorId: number, range: strin
 }
 
 /** What a visitor sees of a page: its monitors without targets or errors, and the last week's outages. */
+/** Which page a custom domain serves (status.example.com → its page), cached for a minute. */
+let domains: { at: number; map: Map<string, string> } | null = null;
+export async function pageForHost(host: string): Promise<string | null> {
+  if (!domains || Date.now() - domains.at > 60_000) {
+    const rows = await all<{ slug: string; domain: string }>("SELECT slug, domain FROM status_pages WHERE domain <> ''");
+    domains = { at: Date.now(), map: new Map(rows.map((r) => [r.domain, r.slug])) };
+  }
+  return domains.map.get(host.toLowerCase()) ?? null;
+}
+export const forgetDomains = () => (domains = null);
+
+/** The custom domains of these pages, to clear their cached copies too. */
+export async function domainsOf(slugs: string[]): Promise<string[]> {
+  if (!slugs.length) return [];
+  return (await all<{ domain: string }>(`SELECT domain FROM status_pages WHERE domain <> '' AND slug IN (${slugs.map(() => "?").join(",")})`, ...slugs)).map((r) => r.domain);
+}
+
 export async function publicPage(slug: string | null) {
   const page = slug
     ? await first<PageRow>("SELECT * FROM status_pages WHERE slug = ?", slug)
     : await first<PageRow>("SELECT * FROM status_pages ORDER BY is_default DESC, id LIMIT 1");
   if (!page) return null;
+  const now = Date.now();
   const groups = (await groupsByPage([page.id])).get(page.id) ?? [];
   const ids = [...new Set(groups.flatMap((g) => g.monitors))];
   const monitors = ids.length ? await all<Monitor>(`SELECT * FROM monitors WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids) : [];
@@ -132,6 +155,8 @@ export async function publicPage(slug: string | null) {
         Date.now() - 7 * DAY,
       )
     : [];
+  const maintenances = await maintenancesFor(ids, now);
+  const underway = new Set(maintenances.filter((w) => w.active).flatMap((w) => w.monitors));
   return {
     slug: page.slug,
     title: page.title,
@@ -143,9 +168,14 @@ export async function publicPage(slug: string | null) {
       name: g.name,
       monitors: g.monitors.flatMap((mid) => {
         const m = byId.get(mid);
-        return m ? [publicMonitorView(m, days.get(mid) ?? [])] : [];
+        if (!m) return [];
+        const v = publicMonitorView(m, days.get(mid) ?? []);
+        return [underway.has(mid) ? { ...v, status: "maintenance" as const } : v];
       }),
     })),
+    posts: await postsFor(page.id, now),
+    // Only the monitors this page shows.
+    maintenances: maintenances.map((w) => ({ ...w, monitors: w.monitors.filter((m) => byId.has(m)) })),
     // Without their technical cause.
     incidents: incidents.map((i) => ({
       monitorId: i.monitorId,
@@ -190,6 +220,16 @@ function parseLogo(v: unknown): string {
   }
 }
 
+/** A host name for the page (status.example.com), or empty. */
+async function parseDomain(v: unknown, except?: number): Promise<string> {
+  const d = str(v, 253).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
+  if (!d) return "";
+  if (!/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/.test(d)) throw bad("Enter a host name like status.example.com");
+  if (d === new URL(config().publicUrl).hostname) throw bad("That's Status's own address");
+  if (await first("SELECT 1 AS x FROM status_pages WHERE domain = ? AND id <> ?", d, except ?? 0)) throw new HttpError(409, "Another page already uses this domain");
+  return d;
+}
+
 async function parseSlug(v: unknown, except?: number) {
   const slug = str(v, 64).toLowerCase();
   if (!SLUG.test(slug)) throw bad("The address can use lowercase letters, digits and dashes");
@@ -232,12 +272,13 @@ pageRoutes.post("/", requireCollaborator, async (c) => {
   const isDefault = !!b.isDefault || !(await first("SELECT 1 AS x FROM status_pages"));
   const now = Date.now();
   const { id: pid } = await run(
-    "INSERT INTO status_pages (slug, title, description, logo_url, display, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO status_pages (slug, title, description, logo_url, display, domain, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     slug,
     title,
     str(b.description, 1000),
     parseLogo(b.logoUrl),
     JSON.stringify(parseDisplay(b.display)),
+    await parseDomain(b.domain),
     isDefault,
     now,
     now,
@@ -256,16 +297,18 @@ pageRoutes.patch("/:id", requireCollaborator, async (c) => {
   const description = b.description !== undefined ? str(b.description, 1000) : p.description;
   const logoUrl = b.logoUrl !== undefined ? parseLogo(b.logoUrl) : p.logoUrl;
   const display = b.display !== undefined ? JSON.stringify(parseDisplay(b.display)) : p.display;
+  const domain = b.domain !== undefined ? await parseDomain(b.domain, p.id) : p.domain;
   // There's always a default page: it can be moved to another one, not switched off.
   const isDefault = b.isDefault === true || !!p.isDefault;
   const statements: [string, ...Param[]][] = [
     [
-      "UPDATE status_pages SET title = ?, slug = ?, description = ?, logo_url = ?, display = ?, is_default = ?, updated_at = ? WHERE id = ?",
+      "UPDATE status_pages SET title = ?, slug = ?, description = ?, logo_url = ?, display = ?, domain = ?, is_default = ?, updated_at = ? WHERE id = ?",
       title,
       slug,
       description,
       logoUrl,
       display,
+      domain,
       isDefault,
       Date.now(),
       p.id,
@@ -274,6 +317,7 @@ pageRoutes.patch("/:id", requireCollaborator, async (c) => {
   if (isDefault) statements.push(["UPDATE status_pages SET is_default = 0 WHERE id <> ?", p.id]);
   if (b.groups !== undefined) statements.push(...groupStatements(p.id, await parseGroups(b.groups)));
   await batch(statements);
+  forgetDomains();
   c.executionCtx.waitUntil(forgetPages(new URL(c.req.url).origin, [p.slug, slug]));
   return c.json(pageView(await getPage(p.id), (await groupsByPage([p.id])).get(p.id) ?? []));
 });

@@ -8,6 +8,8 @@ import { useSettings } from "../lib/settings";
 import { ConfirmDialog, useToast } from "./common";
 import { duration } from "./IncidentsPage";
 import { PageLogo } from "./PublicStatus";
+import { PostForm } from "./PostsPage";
+import { MaintenanceForm } from "./MaintenancePage";
 import { MonitorTypeIcon, interval } from "./MonitorPage";
 import { WEBHOOKS, kindLabel } from "./NotificationsPage";
 import { Switch } from "./settings/common";
@@ -30,6 +32,14 @@ export function SidePanel() {
           ? editing.page
             ? t("pageSettings")
             : t("newStatusPage")
+          : editing.kind === "post"
+            ? editing.post
+              ? t("editPost")
+              : t("newPost")
+            : editing.kind === "maintenance"
+              ? editing.maintenance
+                ? t("editMaintenance")
+                : t("newMaintenance")
           : editing.project
             ? t("editProject")
             : t("addProject");
@@ -50,6 +60,10 @@ export function SidePanel() {
         <WebhookForm key={editing.webhook?.id ?? "new"} webhook={editing.webhook} />
       ) : editing.kind === "page" ? (
         <PageForm key={editing.page?.id ?? "new"} page={editing.page} />
+      ) : editing.kind === "post" ? (
+        <PostForm key={editing.post?.id ?? "new"} post={editing.post} />
+      ) : editing.kind === "maintenance" ? (
+        <MaintenanceForm key={editing.maintenance?.id ?? "new"} maintenance={editing.maintenance} />
       ) : (
         <ProjectForm key={editing.project?.id ?? "new"} project={editing.project} />
       )}
@@ -107,7 +121,7 @@ function Activity() {
 
 // --- Forms ---
 
-function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="form-field">
       <span className="form-label">{label}</span>
@@ -117,7 +131,7 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
   );
 }
 
-function FormShell({ onSubmit, busy, error, children, onDelete, submitLabel }: { onSubmit: () => Promise<void>; busy: boolean; error: string | null; children: ReactNode; onDelete?: () => void; submitLabel: string }) {
+export function FormShell({ onSubmit, busy, error, children, onDelete, submitLabel }: { onSubmit: () => Promise<void>; busy: boolean; error: string | null; children: ReactNode; onDelete?: () => void; submitLabel: string }) {
   const { t } = useSettings();
   const { edit } = useApp();
   return (
@@ -538,6 +552,7 @@ function PageForm({ page }: { page?: StatusPage }) {
   const [description, setDescription] = useState(page?.description ?? "");
   const [logoUrl, setLogoUrl] = useState(page?.logoUrl ?? "");
   const [isDefault, setIsDefault] = useState(page?.isDefault ?? false);
+  const [domain, setDomain] = useState(page?.domain ?? "");
   const [display, setDisplay] = useState<PageDisplay>(page?.display ?? { tiles: true, bars: true, incidents: true, charts: "off" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -547,7 +562,7 @@ function PageForm({ page }: { page?: StatusPage }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = await api<StatusPage>(page ? `${PAGES}/${page.id}` : PAGES, { method: page ? "PATCH" : "POST", body: { title, slug, description, logoUrl, display, ...(isDefault ? { isDefault: true } : {}) } });
+      const saved = await api<StatusPage>(page ? `${PAGES}/${page.id}` : PAGES, { method: page ? "PATCH" : "POST", body: { title, slug, description, logoUrl, display, domain, ...(isDefault ? { isDefault: true } : {}) } });
       invalidate(PAGES);
       window.dispatchEvent(new Event("status:pages"));
       toast(page ? t("saved") : t("pageCreated"));
@@ -602,6 +617,22 @@ function PageForm({ page }: { page?: StatusPage }) {
           <Switch checked={isDefault} onChange={(on) => setIsDefault(on || !!page?.isDefault)} label={t("defaultPage")} />
         </div>
         <span className="form-hint">{t("defaultPageHint")}</span>
+        <Field label={t("customDomain")} hint={t("customDomainHint")}>
+          <input className="text-field" value={domain} spellCheck={false} placeholder="status.example.com" onChange={(e) => setDomain(e.target.value.trim().toLowerCase())} />
+        </Field>
+        {domain && (
+          <div className="domain-steps">
+            <span className="form-label">{t("customDomainSteps")}</span>
+            <ol>
+              <li>{t("customDomainStep1")}</li>
+              <li>
+                {t("customDomainStep2")}
+                <pre className="message-code">{`{ "pattern": "${domain}", "custom_domain": true }`}</pre>
+              </li>
+              <li>{t("customDomainStep3")}</li>
+            </ol>
+          </div>
+        )}
         <div className="form-field">
           <span className="form-label">{t("displayTitle")}</span>
           {(["tiles", "bars", "incidents"] as const).map((k) => (

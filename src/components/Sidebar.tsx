@@ -3,7 +3,7 @@ import { canContribute, type Status } from "../lib/api";
 import { useApp } from "../lib/app";
 import { useSettings } from "../lib/settings";
 import { StatusDot, statusKey } from "./status";
-import { Activity, AlertTriangle, Bell, Globe, Home, PanelLeft, Pencil, Plus, Search } from "./icons";
+import { Activity, AlertTriangle, Bell, Globe, Home, Megaphone, PanelLeft, Pencil, Plus, Search, Wrench } from "./icons";
 
 const MIN_W = 200;
 const MAX_W = 480;
@@ -21,7 +21,7 @@ export function Sidebar() {
     navigate({ name: "overview" }, Object.fromEntries(next));
   };
   const down = all.filter((m) => m.status === "down").length;
-  const statuses: Status[] = ["down", "degraded", "up", "paused"];
+  const statuses: Status[] = ["down", "degraded", "up", "maintenance", "paused"];
   const loose = all.filter((m) => m.projectId === null).length;
   const pinned = all.filter((m) => m.status === "down" || m.status === "degraded");
 
@@ -48,6 +48,14 @@ export function Sidebar() {
           <AlertTriangle />
           <span className="row-label">{t("incidents")}</span>
           <span className="row-meta">{down ? <span className="count-badge">{f.number(down)}</span> : ""}</span>
+        </button>
+        <button className={`sidebar-row${route.name === "posts" || route.name === "post" ? " active" : ""}`} onClick={() => navigate({ name: "posts" }, {})}>
+          <Megaphone />
+          <span className="row-label">{t("posts")}</span>
+        </button>
+        <button className={`sidebar-row${route.name === "maintenance" ? " active" : ""}`} onClick={() => navigate({ name: "maintenance" }, {})}>
+          <Wrench />
+          <span className="row-label">{t("maintenanceTitle")}</span>
         </button>
         <button className={`sidebar-row${route.name === "notifications" || route.name === "webhook" ? " active" : ""}`} onClick={() => navigate({ name: "notifications" }, {})}>
           <Bell />

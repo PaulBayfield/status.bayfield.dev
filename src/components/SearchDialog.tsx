@@ -7,7 +7,7 @@ import { useApp, type SettingsPage } from "../lib/app";
 import { useSettings } from "../lib/settings";
 import type { StringKey } from "../lib/i18n";
 import { StatusDot } from "./status";
-import { AlertTriangle, Bell, Gear, Globe, Home, Plus, Search } from "./icons";
+import { AlertTriangle, Bell, Gear, Globe, Home, Megaphone, Plus, Search, Wrench } from "./icons";
 
 interface Result {
   key: string;
@@ -69,6 +69,8 @@ export function SearchDialog({ onClose }: { onClose: () => void }) {
       ["overview", <Home size={16} />, () => navigate({ name: "overview" }, {})],
       ["incidents", <AlertTriangle size={16} />, () => navigate({ name: "incidents" }, {})],
       ["notifications", <Bell size={16} />, () => navigate({ name: "notifications" }, {})],
+      ["posts", <Megaphone size={16} />, () => navigate({ name: "posts" }, {})],
+      ["maintenanceTitle", <Wrench size={16} />, () => navigate({ name: "maintenance" }, {})],
       ["statusPages", <Globe size={16} />, () => navigate({ name: "pages" }, {})],
     ];
     if (q) for (const [label, icon, run] of pages) if (keep(t(label))) out.push({ key: `page:${label}`, section: "pages", title: t(label), icon, run: done(run) });
@@ -78,6 +80,8 @@ export function SearchDialog({ onClose }: { onClose: () => void }) {
         ["addProject", () => edit({ kind: "project" })],
         ["addWebhook", () => edit({ kind: "webhook" })],
         ["newStatusPage", () => edit({ kind: "page" })],
+        ["newPost", () => edit({ kind: "post" })],
+        ["newMaintenance", () => edit({ kind: "maintenance" })],
       ];
       for (const [label, run] of actions) if (keep(t(label))) out.push({ key: `a:${label}`, section: "actions", title: t(label), icon: <Plus size={16} />, run: done(run) });
     }

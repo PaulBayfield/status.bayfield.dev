@@ -14,6 +14,8 @@ import { certificateTarget, checkExpiries, domainTarget, expiriesOf } from "./ex
 import { expiryChange } from "./checks.ts";
 import { updateStatus } from "./updates.ts";
 import { listPages, pageRoutes, pagesByMonitor } from "./pages.ts";
+import { inMaintenance, maintenanceRoutes } from "./maintenance.ts";
+import { postRoutes } from "./posts.ts";
 import { isRole, meView, type User } from "./users.ts";
 
 export const api = new Hono<AppEnv>();
@@ -77,6 +79,8 @@ api.delete("/projects/:id", requireCollaborator, async (c) => {
 // --- Status pages ---
 
 api.route("/pages", pageRoutes);
+api.route("/posts", postRoutes);
+api.route("/maintenance", maintenanceRoutes);
 
 // --- Monitors ---
 
@@ -166,8 +170,11 @@ api.get("/monitors", async (c) => {
   const days = await daysByMonitor(monitors.map((m) => m.id));
   const pages = await pagesByMonitor();
   const expiries = await expiriesOf(monitors.map((m) => m.id));
+  const maintenance = await inMaintenance();
   const secrets = canEdit(c.get("user"));
-  return c.json(monitors.map((m) => monitorView(m, days.get(m.id) ?? [], { secrets, pages: pages.get(m.id), expiries: expiries.get(m.id) })));
+  return c.json(
+    monitors.map((m) => monitorView(m, days.get(m.id) ?? [], { secrets, pages: pages.get(m.id), expiries: expiries.get(m.id), maintenance: maintenance.has(m.id) })),
+  );
 });
 
 api.get("/monitors/:id", async (c) => {
@@ -183,7 +190,12 @@ api.get("/monitors/:id", async (c) => {
   const latency30 = lastDays(30).reduce((a, d) => ({ sum: a.sum + d.latencySum, n: a.n + d.latencyCount }), { sum: 0, n: 0 });
   const open = await first<{ id: number; startedAt: number; cause: string }>("SELECT id, started_at, cause FROM incidents WHERE monitor_id = ? AND resolved_at IS NULL", m.id);
   return c.json({
-    ...monitorView(m, days, { secrets: canEdit(c.get("user")), pages: (await pagesByMonitor()).get(m.id), expiries: (await expiriesOf([m.id])).get(m.id) }),
+    ...monitorView(m, days, {
+      secrets: canEdit(c.get("user")),
+      pages: (await pagesByMonitor()).get(m.id),
+      expiries: (await expiriesOf([m.id])).get(m.id),
+      maintenance: (await inMaintenance()).has(m.id),
+    }),
     stats: {
       uptime24h: day?.total ? (day.ok ?? 0) / day.total : null,
       uptime7d: uptime(lastDays(7)),

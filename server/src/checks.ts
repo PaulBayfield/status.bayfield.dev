@@ -8,6 +8,7 @@ import { all, batch, first, run } from "./db.ts";
 import { config } from "./config.ts";
 import { notify, type Change } from "./notify.ts";
 import { checkExpiries, dueExpiries, type ExpiryNotice } from "./expiry.ts";
+import { IN_MAINTENANCE_SQL, inMaintenance } from "./maintenance.ts";
 
 export type MonitorType = "http" | "tcp" | "heartbeat";
 export type Status = "pending" | "up" | "degraded" | "down";
@@ -244,7 +245,14 @@ async function pool<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>): P
 
 /** The cron job: every due monitor, then the notifications, then housekeeping. */
 export async function runDue(now = Date.now()) {
-  const due = await all<Monitor>("SELECT * FROM monitors WHERE paused = 0 AND next_check_at <= ? ORDER BY next_check_at LIMIT ?", now + 5_000, MAX_CHECKS_PER_RUN);
+  // Monitors in a maintenance window wait: no checks, so no alerts and no downtime counted.
+  const due = await all<Monitor>(
+    `SELECT * FROM monitors WHERE paused = 0 AND next_check_at <= ? AND id NOT IN (${IN_MAINTENANCE_SQL}) ORDER BY next_check_at LIMIT ?`,
+    now + 5_000,
+    now,
+    now,
+    MAX_CHECKS_PER_RUN,
+  );
   const changes = await pool(due, CONCURRENCY, async (m) => {
     try {
       // Heartbeats only record when something is wrong; their pings record the rest.
@@ -305,7 +313,7 @@ export async function ping(token: string, reported: { status?: string; msg?: str
   if (!m) return null;
   const now = Date.now();
   await run("UPDATE monitors SET last_ping_at = ? WHERE id = ?", now, m.id);
-  if (m.paused) return m;
+  if (m.paused || (await inMaintenance(now)).has(m.id)) return m;
   const down = reported.status === "down" || reported.status === "error";
   const latency = reported.ms && /^\d+$/.test(reported.ms) ? Math.min(Number(reported.ms), 3_600_000) : null;
   const message = (reported.msg ?? "").slice(0, 300) || (down ? "Reported down" : "Heartbeat received");

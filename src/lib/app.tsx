@@ -1,7 +1,7 @@
 // What every part of the signed-in app can reach: the user, the monitors, navigation, the panel.
 
 import { createContext, useContext } from "react";
-import type { Me, Monitor, Project, ServerInfo, Status, StatusPage, Webhook } from "./api";
+import type { Maintenance, Me, Monitor, Post, Project, ServerInfo, Status, StatusPage, Webhook } from "./api";
 import type { Route } from "./router";
 
 export type SettingsPage = "profile" | "preferences" | "security" | "data" | "shortcuts" | "users" | "about";
@@ -11,7 +11,9 @@ export type Editing =
   | { kind: "monitor"; monitor?: Monitor; projectId?: number | null }
   | { kind: "webhook"; webhook?: Webhook }
   | { kind: "project"; project?: Project }
-  | { kind: "page"; page?: StatusPage };
+  | { kind: "page"; page?: StatusPage }
+  | { kind: "post"; post?: Post }
+  | { kind: "maintenance"; maintenance?: Maintenance };
 
 export interface AppContextValue {
   me: Me;
@@ -55,10 +57,11 @@ export function matches(m: Monitor, project: number | null, status: Status | nul
 }
 
 /** The worst status among monitors: what the banner says. */
-export function overall(monitors: { status: Status }[]): "up" | "degraded" | "down" | "none" {
+export function overall(monitors: { status: Status }[]): "up" | "degraded" | "down" | "maintenance" | "none" {
   const active = monitors.filter((m) => m.status !== "paused" && m.status !== "pending");
   if (!active.length) return "none";
   if (active.some((m) => m.status === "down")) return "down";
   if (active.some((m) => m.status === "degraded")) return "degraded";
+  if (active.some((m) => m.status === "maintenance")) return "maintenance";
   return "up";
 }

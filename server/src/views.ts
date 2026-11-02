@@ -61,7 +61,11 @@ export const expiryView = (e: Expiry) => ({
   checkedAt: iso(e.checkedAt),
 });
 
-export function monitorView(m: Monitor, days: Day[], opts: { secrets: boolean; pages?: { id: number; slug: string; title: string }[]; expiries?: Expiry[] }) {
+export function monitorView(
+  m: Monitor,
+  days: Day[],
+  opts: { secrets: boolean; pages?: { id: number; slug: string; title: string }[]; expiries?: Expiry[]; maintenance?: boolean },
+) {
   return {
     id: m.id,
     projectId: m.projectId,
@@ -87,7 +91,8 @@ export function monitorView(m: Monitor, days: Day[], opts: { secrets: boolean; p
     expiryWarnDays: m.expiryWarnDays,
     expiries: (opts.expiries ?? []).map(expiryView),
     paused: !!m.paused,
-    status: m.paused ? ("paused" as const) : m.status,
+    // Paused wins; then a running maintenance window.
+    status: m.paused ? ("paused" as const) : opts.maintenance ? ("maintenance" as const) : m.status,
     lastCheckedAt: iso(m.lastCheckedAt),
     lastLatency: m.lastLatency,
     lastMessage: m.lastMessage,

@@ -8,7 +8,8 @@ import { config, type Env } from "./config.ts";
 import { first, migrate } from "./db.ts";
 import { api } from "./api.ts";
 import { authRoutes, sameOrigin } from "./auth.ts";
-import { publicRoutes, pushRoute } from "./public.ts";
+import { embedRoute, publicRoutes, pushRoute } from "./public.ts";
+import { pageForHost } from "./pages.ts";
 import { runDue } from "./checks.ts";
 import { sha256Base64 } from "./crypto.ts";
 import { HttpError } from "./http.ts";
@@ -43,20 +44,37 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// A status page's custom domain (status.example.com, attached to this Worker) serves that page and
+// its public data only: the dashboard, sign-in and the account API stay on Status's own address.
 app.use("*", async (c, next) => {
+  const host = new URL(c.req.url).hostname;
+  if (host === new URL(config().publicUrl).hostname || !(await pageForHost(host))) return next();
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/api/") && !path.startsWith("/api/public/") && path !== "/api/health") return c.json({ error: "Not found" }, 404);
+  return next();
+});
+
+app.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  // The widget is meant to be framed by other sites, and badges loaded by them.
+  const embed = path === "/embed" || path.startsWith("/embed/");
+  const shared = embed || path.startsWith("/api/public/badge/") || /^\/api\/public\/pages\/[^/]+\/badge$/.test(path);
   const hashes = await scriptHashes(new URL(c.req.url).origin);
   return secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", ...hashes],
+      scriptSrc: embed ? ["'none'"] : ["'self'", ...hashes],
       styleSrc: ["'self'", "'unsafe-inline'"],
       // Status page logos are links to images hosted elsewhere.
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
-      frameAncestors: ["'none'"],
+      frameAncestors: embed ? ["*"] : ["'none'"],
       formAction: ["'self'"],
       baseUri: ["'self'"],
     },
+    xFrameOptions: embed ? false : "SAMEORIGIN",
+    crossOriginResourcePolicy: shared ? "cross-origin" : "same-origin",
+    crossOriginEmbedderPolicy: false,
     referrerPolicy: "strict-origin-when-cross-origin",
   })(c, next);
 });
@@ -75,6 +93,9 @@ app.route("/api/auth", authRoutes);
 app.route("/api/public", publicRoutes);
 app.route("/api/app", api);
 app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
+
+app.get("/embed", embedRoute);
+app.get("/embed/:slug", embedRoute);
 
 // The web build: hashed assets cached forever, pages (the SPA fallback) always revalidated.
 app.get("*", async (c) => {

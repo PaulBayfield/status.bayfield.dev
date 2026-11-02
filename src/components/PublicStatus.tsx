@@ -3,13 +3,15 @@
 // Same look as the overview: header bar, banner, tiles, grouped monitor rows.
 
 import { useEffect, useState } from "react";
-import { api, ApiError, type PageDisplay, type PublicStatus as Data, type Series } from "../lib/api";
+import { api, ApiError, type PageDisplay, type PublicMaintenance, type PublicPost, type PublicStatus as Data, type Series } from "../lib/api";
+import { ImpactBadge, PostStatusPill } from "./PostsPage";
+import { useWindowText } from "./MaintenancePage";
 import { overall } from "../lib/app";
 import { Markdown } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
 import { duration } from "./IncidentsPage";
 import { StatusDot, StatusIcon, UptimeBars, pct, statusKey } from "./status";
-import { Activity, AlertTriangle, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX, Clock } from "./icons";
+import { Activity, AlertTriangle, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX, Clock, Megaphone, Wrench } from "./icons";
 import { LatencyChart } from "./LatencyChart";
 import { Spinner } from "./common";
 
@@ -45,7 +47,16 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
   const groups = data?.groups.filter((g) => g.monitors.length) ?? [];
   // A monitor can sit in several groups: count it once.
   const monitors = [...new Map(groups.flatMap((g) => g.monitors).map((m) => [m.id, m])).values()];
-  const state = data ? overall(monitors) : "none";
+  const openPosts = data?.posts.filter((x) => x.status !== "resolved") ?? [];
+  const pastPosts = data?.posts.filter((x) => x.status === "resolved") ?? [];
+  // Open posts count like the monitors: a major one is an outage, a minor one a degradation.
+  const fromMonitors = data ? overall(monitors) : "none";
+  const state =
+    fromMonitors === "down" || openPosts.some((x) => x.impact === "major")
+      ? "down"
+      : fromMonitors === "degraded" || openPosts.some((x) => x.impact === "minor")
+        ? "degraded"
+        : fromMonitors;
   const down = monitors.filter((m) => m.status === "down");
   const degraded = monitors.filter((m) => m.status === "degraded");
   const active = monitors.filter((m) => m.status !== "paused");
@@ -69,10 +80,17 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
             <time dateTime={data.updatedAt}>{f.time(data.updatedAt)}</time>
           </span>
         )}
-        {action && (
-          <button className="text-button" onClick={action.run}>
-            {action.label}
-          </button>
+        {/* On a custom domain, the dashboard is at Status's own address. */}
+        {data?.home ? (
+          <a className="text-button" href={data.home}>
+            {t("signIn")}
+          </a>
+        ) : (
+          action && (
+            <button className="text-button" onClick={action.run}>
+              {action.label}
+            </button>
+          )
         )}
       </header>
       <div className="content">
@@ -93,11 +111,37 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
                   {data.description && <Markdown className="public-description" text={data.description} />}
                 </div>
               </div>
+              {openPosts.map((x) => (
+                <PostCard key={x.id} post={x} names={monitors} />
+              ))}
+              {data.maintenances.map((w) => (
+                <MaintenanceCard key={w.id} w={w} names={monitors} />
+              ))}
               <div className={`overall-banner o-${state}`}>
-                {state === "down" ? <CircleX size={22} /> : state === "degraded" ? <AlertTriangle size={22} /> : <CircleCheck size={22} />}
+                {state === "down" ? <CircleX size={22} /> : state === "degraded" ? <AlertTriangle size={22} /> : state === "maintenance" ? <Wrench size={22} /> : <CircleCheck size={22} />}
                 <div>
-                  <strong>{state === "down" ? t("publicDown") : state === "degraded" ? t("publicDegraded") : state === "none" ? t("noPublicMonitors") : t("allOperational")}</strong>
-                  <span>{state === "down" ? f.list(down.map((m) => m.name)) : state === "degraded" ? f.list(degraded.map((m) => m.name)) : active.length === 1 ? t("oneMonitorWatched") : t("monitorsWatched", { n: f.number(active.length) })}</span>
+                  <strong>
+                    {state === "down"
+                      ? t("publicDown")
+                      : state === "degraded"
+                        ? t("publicDegraded")
+                        : state === "maintenance"
+                          ? t("publicMaintenance")
+                          : state === "none"
+                            ? t("noPublicMonitors")
+                            : t("allOperational")}
+                  </strong>
+                  <span>
+                    {state === "down" && down.length
+                      ? f.list(down.map((m) => m.name))
+                      : state === "degraded" && degraded.length
+                        ? f.list(degraded.map((m) => m.name))
+                        : state === "down" || state === "degraded"
+                          ? f.list(openPosts.map((x) => x.title))
+                          : active.length === 1
+                            ? t("oneMonitorWatched")
+                            : t("monitorsWatched", { n: f.number(active.length) })}
+                  </span>
                 </div>
               </div>
 
@@ -124,6 +168,15 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
                   </div>
                 </section>
               ))}
+
+              {data.display.incidents && pastPosts.length > 0 && (
+                <section className="monitor-group">
+                  <h2 className="group-title">{t("pastPosts")}</h2>
+                  {pastPosts.map((x) => (
+                    <PostCard key={x.id} post={x} names={monitors} collapsed />
+                  ))}
+                </section>
+              )}
 
               {data.display.incidents && (ongoing.length > 0 || past.length > 0) && (
                 <section className="monitor-group">
@@ -195,7 +248,7 @@ function PublicRow({ m, slug, display }: { m: PublicMonitor; slug: string; displ
             <span className={`target s-${m.status}`}>
               <StatusIcon status={m.status} size={12} />
               {t(statusKey(m.status))}
-              {m.statusSince && m.status !== "up" && <span className="muted"> · {f.relative(m.statusSince, t)}</span>}
+              {m.statusSince && m.status !== "up" && m.status !== "maintenance" && <span className="muted"> · {f.relative(m.statusSince, t)}</span>}
               {charts && (
                 <button type="button" className="chart-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
                   {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -262,5 +315,76 @@ function IncidentRow({ i }: { i: PublicIncident }) {
       </span>
       {!i.resolvedAt && <span className="status-pill s-down">{t("ongoing")}</span>}
     </div>
+  );
+}
+
+/** A post as visitors see it: impact, status, the latest update, and the earlier ones on demand. */
+function PostCard({ post, names, collapsed }: { post: PublicPost; names: { id: number; name: string }[]; collapsed?: boolean }) {
+  const { t, f } = useSettings();
+  const [all, setAll] = useState(false);
+  const [latest, ...older] = post.updates;
+  const affected = post.monitors.map((id) => names.find((m) => m.id === id)?.name).filter(Boolean) as string[];
+  return (
+    <article className={`post-card i-${post.impact}${post.status === "resolved" ? " resolved" : ""}`}>
+      <header>
+        <Megaphone size={16} />
+        <strong>{post.title}</strong>
+        {post.status !== "resolved" && <ImpactBadge impact={post.impact} />}
+        <div className="toolbar-spacer" />
+        <PostStatusPill status={post.status} />
+      </header>
+      {affected.length > 0 && <span className="small muted">{t("affects", { list: f.list(affected) })}</span>}
+      {latest && !collapsed && (
+        <div className="post-update">
+          <Markdown text={latest.body} />
+          <span className="small muted">{f.dateTime(latest.createdAt)}</span>
+        </div>
+      )}
+      {(collapsed ? post.updates.length > 0 : older.length > 0) && (
+        <button className="chart-toggle" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {collapsed
+            ? post.updates.length === 1
+              ? t("showUpdate")
+              : t("showUpdates", { n: f.number(post.updates.length) })
+            : older.length === 1
+              ? t("earlierUpdate")
+              : t("earlierUpdates", { n: f.number(older.length) })}
+        </button>
+      )}
+      {all && (
+        <ol className="timeline compact">
+          {(collapsed ? post.updates : older).map((u) => (
+            <li key={u.id} className={`p-${u.status}`}>
+              <div className="timeline-head">
+                <PostStatusPill status={u.status} />
+                <span className="small muted">{f.dateTime(u.createdAt)}</span>
+              </div>
+              <Markdown text={u.body} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </article>
+  );
+}
+
+/** Planned maintenance: running now, or coming. */
+function MaintenanceCard({ w, names }: { w: PublicMaintenance; names: { id: number; name: string }[] }) {
+  const { t, f } = useSettings();
+  const span = useWindowText();
+  const affected = w.monitors.map((id) => names.find((m) => m.id === id)?.name).filter(Boolean) as string[];
+  return (
+    <article className={`post-card maintenance${w.active ? " active" : ""}`}>
+      <header>
+        <Wrench size={16} />
+        <strong>{w.title}</strong>
+        <div className="toolbar-spacer" />
+        <span className="status-pill s-maintenance">{w.active ? t("window_active_short") : t("window_upcoming_short")}</span>
+      </header>
+      <span className="small">{span(w)}</span>
+      {affected.length > 0 && <span className="small muted">{t("affects", { list: f.list(affected) })}</span>}
+      {w.description && <Markdown className="small" text={w.description} />}
+    </article>
   );
 }

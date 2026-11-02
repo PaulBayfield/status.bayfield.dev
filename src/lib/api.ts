@@ -74,8 +74,8 @@ export interface Session {
 
 export const MONITOR_TYPES = ["http", "tcp", "heartbeat"] as const;
 export type MonitorType = (typeof MONITOR_TYPES)[number];
-export type Status = "pending" | "up" | "degraded" | "down" | "paused";
-export const STATUSES: Status[] = ["down", "degraded", "up", "pending", "paused"];
+export type Status = "pending" | "up" | "degraded" | "down" | "paused" | "maintenance";
+export const STATUSES: Status[] = ["down", "degraded", "up", "maintenance", "pending", "paused"];
 
 /** [day "2026-11-02", checks, down, degraded] */
 export type HistoryDay = readonly [string, number, number, number];
@@ -279,6 +279,8 @@ export interface StatusPage {
   /** A link to an image hosted elsewhere; empty for the app's icon. */
   logoUrl: string;
   display: PageDisplay;
+  /** A host name that serves this page at / (status.example.com), or empty. */
+  domain: string;
   isDefault: boolean;
   groups: StatusPageGroup[];
   updatedAt: string;
@@ -300,6 +302,66 @@ export interface PublicStatus {
   logoUrl: string;
   display: PageDisplay;
   updatedAt: string;
+  /** On a custom domain: Status's own address, for "Sign in". */
+  home: string | null;
+  posts: PublicPost[];
+  maintenances: PublicMaintenance[];
   groups: { name: string; monitors: { id: number; name: string; status: Status; statusSince: string | null; uptime90: number | null; history: HistoryDay[] }[] }[];
   incidents: { monitorId: number; monitorName: string; startedAt: string; resolvedAt: string | null }[];
 }
+
+// --- Incident posts and maintenance ---
+
+export const POST_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
+export type PostStatus = (typeof POST_STATUSES)[number];
+export const IMPACTS = ["none", "minor", "major"] as const;
+export type Impact = (typeof IMPACTS)[number];
+
+export interface PostUpdate {
+  id: number;
+  status: PostStatus;
+  body: string;
+  createdAt: string;
+  author?: string;
+}
+
+export interface Post {
+  id: number;
+  title: string;
+  impact: Impact;
+  status: PostStatus;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  pages: number[];
+  monitors: number[];
+  /** Newest first. */
+  updates: PostUpdate[];
+}
+
+export type PublicPost = Omit<Post, "author" | "updatedAt" | "pages">;
+
+export interface Maintenance {
+  id: number;
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  author: string;
+  monitors: number[];
+}
+
+export interface PublicMaintenance {
+  id: number;
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  active: boolean;
+  monitors: number[];
+}
+
+export type WindowState = "upcoming" | "active" | "done";
+export const windowState = (w: { startsAt: string; endsAt: string }, now = Date.now()): WindowState =>
+  new Date(w.startsAt).getTime() > now ? "upcoming" : new Date(w.endsAt).getTime() > now ? "active" : "done";

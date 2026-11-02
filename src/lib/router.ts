@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export type Route = { name: "overview" } | { name: "monitor"; id: number } | { name: "incidents" } | { name: "notifications" } | { name: "webhook"; id: number } | { name: "pages" } | { name: "page"; id: number } | { name: "status"; slug?: string };
+export type Route = { name: "overview" } | { name: "monitor"; id: number } | { name: "incidents" } | { name: "notifications" } | { name: "webhook"; id: number } | { name: "pages" } | { name: "posts" } | { name: "post"; id: number } | { name: "maintenance" } | { name: "page"; id: number } | { name: "status"; slug?: string };
 
 export function parseRoute(path: string): Route {
   const parts = path.replace(/^\/+|\/+$/g, "").split("/").map(decodeURIComponent);
@@ -12,6 +12,9 @@ export function parseRoute(path: string): Route {
   if (parts[0] === "notifications" && parts[1] && /^\d+$/.test(parts[1])) return { name: "webhook", id: Number(parts[1]) };
   if (parts[0] === "notifications") return { name: "notifications" };
   if (parts[0] === "pages" && parts[1] && /^\d+$/.test(parts[1])) return { name: "page", id: Number(parts[1]) };
+  if (parts[0] === "posts" && parts[1] && /^\d+$/.test(parts[1])) return { name: "post", id: Number(parts[1]) };
+  if (parts[0] === "posts") return { name: "posts" };
+  if (parts[0] === "maintenance") return { name: "maintenance" };
   if (parts[0] === "pages") return { name: "pages" };
   if (parts[0] === "status") return parts[1] ? { name: "status", slug: parts[1].toLowerCase() } : { name: "status" };
   return { name: "overview" };
@@ -21,6 +24,7 @@ export function routePath(r: Route): string {
   if (r.name === "monitor") return `/m/${r.id}`;
   if (r.name === "overview") return "/";
   if (r.name === "page") return `/pages/${r.id}`;
+  if (r.name === "post") return `/posts/${r.id}`;
   if (r.name === "webhook") return `/notifications/${r.id}`;
   if (r.name === "status") return r.slug ? `/status/${encodeURIComponent(r.slug)}` : "/status";
   return `/${r.name}`;

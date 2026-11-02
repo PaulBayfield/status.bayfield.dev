@@ -17,6 +17,8 @@ import { NotificationsPage } from "./components/NotificationsPage";
 import { MessageEditor } from "./components/MessageEditor";
 import { PublicStatus } from "./components/PublicStatus";
 import { PageEditor, StatusPagesPage } from "./components/StatusPagesPage";
+import { PostPage, PostsPage } from "./components/PostsPage";
+import { MaintenancePage } from "./components/MaintenancePage";
 import { SidePanel } from "./components/SidePanel";
 import { statusKey } from "./components/status";
 
@@ -244,6 +246,10 @@ function Shell({ me, setMe, router, onSignedOut }: { me: Me; setMe: (me: Me) => 
           ? t("notifications")
           : r.name === "pages" || r.name === "page"
             ? t("statusPages")
+            : r.name === "posts" || r.name === "post"
+              ? t("posts")
+              : r.name === "maintenance"
+                ? t("maintenanceTitle")
             : (projectName ?? (status ? t(statusKey(status)) : t("overview")));
 
   return (
@@ -264,6 +270,9 @@ function Shell({ me, setMe, router, onSignedOut }: { me: Me; setMe: (me: Me) => 
             {r.name === "notifications" && <NotificationsPage />}
             {r.name === "webhook" && <MessageEditor key={r.id} id={r.id} />}
             {r.name === "pages" && <StatusPagesPage />}
+            {r.name === "posts" && <PostsPage />}
+            {r.name === "post" && <PostPage key={r.id} id={r.id} />}
+            {r.name === "maintenance" && <MaintenancePage />}
             {r.name === "page" && <PageEditor key={r.id} id={r.id} />}
           </div>
         </main>

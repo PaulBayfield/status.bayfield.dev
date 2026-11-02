@@ -5,7 +5,7 @@ import { useMemo, useRef, useState, type CSSProperties } from "react";
 import type { HistoryDay, Status } from "../lib/api";
 import type { StringKey } from "../lib/i18n";
 import { useSettings } from "../lib/settings";
-import { AlertTriangle, CircleCheck, CircleDashed, CirclePause, CircleX } from "./icons";
+import { AlertTriangle, CircleCheck, CircleDashed, CirclePause, CircleX, Wrench } from "./icons";
 
 export const statusKey = (s: Status): StringKey => `status_${s}`;
 
@@ -14,6 +14,7 @@ export function StatusIcon({ status, size = 14 }: { status: Status; size?: numbe
   if (status === "down") return <CircleX size={size} />;
   if (status === "degraded") return <AlertTriangle size={size} />;
   if (status === "paused") return <CirclePause size={size} />;
+  if (status === "maintenance") return <Wrench size={size} />;
   return <CircleDashed size={size} />;
 }
 
