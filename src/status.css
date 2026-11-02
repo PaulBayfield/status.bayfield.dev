@@ -1079,7 +1079,65 @@ a.sidebar-row {
 }
 .public-description {
   color: var(--text-muted);
-  white-space: pre-line;
+}
+
+/* Markdown (status page descriptions) */
+.markdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.markdown > * {
+  margin: 0;
+}
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 14px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border-strong);
+}
+.markdown strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.markdown code {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+.markdown a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.markdown a:hover {
+  text-decoration: underline;
+}
+.markdown.small {
+  gap: 4px;
 }
 .monitor-row.public-row {
   grid-template-columns: minmax(180px, 1fr) minmax(200px, 2fr) 96px;

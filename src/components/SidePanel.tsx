@@ -549,7 +549,7 @@ function PageForm({ page }: { page?: StatusPage }) {
             {/^https:\/\/.+/.test(logoUrl) && <PageLogo url={logoUrl} size={28} />}
           </div>
         </Field>
-        <Field label={t("pageDescription")}>
+        <Field label={t("pageDescription")} hint={t("pageDescriptionHint")}>
           <textarea className="text-field prose-field" rows={3} value={description} maxLength={1000} placeholder={t("optional")} onChange={(e) => setDescription(e.target.value)} />
         </Field>
         <div className="form-row">

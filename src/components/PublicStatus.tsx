@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type PublicStatus as Data } from "../lib/api";
 import { overall } from "../lib/app";
+import { Markdown } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
 import { duration } from "./IncidentsPage";
 import { StatusDot, StatusIcon, UptimeBars, pct, statusKey } from "./status";
@@ -88,7 +89,7 @@ export function PublicStatus({ slug, action }: { slug?: string; action?: { label
                 {data.logoUrl && <PageLogo url={data.logoUrl} size={56} />}
                 <div className="public-hero-text">
                   <h1>{data.title}</h1>
-                  {data.description && <p className="public-description">{data.description}</p>}
+                  {data.description && <Markdown className="public-description" text={data.description} />}
                 </div>
               </div>
               <div className={`overall-banner o-${state}`}>

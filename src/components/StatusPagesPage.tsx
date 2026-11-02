@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, canContribute, type Monitor, type StatusPage, type StatusPageGroup } from "../lib/api";
 import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
+import { Markdown } from "../lib/markdown";
 import { useSettings } from "../lib/settings";
 import { Spinner, useToast } from "./common";
 import { MonitorTypeIcon } from "./MonitorPage";
@@ -177,7 +178,7 @@ export function PageEditor({ id }: { id: number }) {
             {location.origin}
             {pageUrl(p)}
           </a>
-          {p.description && <span className="small muted public-description">{p.description}</span>}
+          {p.description && <Markdown className="small muted public-description" text={p.description} />}
         </div>
         <div className="webhook-actions">
           <a className="text-button" href={pageUrl(p)} target="_blank" rel="noreferrer">
