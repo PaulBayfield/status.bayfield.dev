@@ -1058,7 +1058,8 @@ a.sidebar-row {
 }
 .public-hero {
   display: flex;
-  align-items: center;
+  /* The logo stays beside the title, however long the description. */
+  align-items: flex-start;
   gap: 16px;
   padding: 4px 0;
 }
