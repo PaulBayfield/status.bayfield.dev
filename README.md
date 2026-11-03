@@ -55,6 +55,7 @@ Key features:
   - **Website / API:** a request to a URL, with the expected status codes (`200-299,301`), an optional keyword (or `!keyword` for "must not contain"), method, headers, timeout and redirects
   - **TCP port:** SSH, a database, a game server… anything that accepts connections
   - **Heartbeat:** your server or cron job calls a secret URL; no call in time means down. Works for machines behind NAT or a firewall, and for backups and scheduled jobs
+- **JSON checks:** an HTTP monitor can take its status from a field of the JSON answer, like `extra.database` *is true* for a bot running [dPyStatus](https://github.com/PaulBayfield/dPyStatus) (also: is false, equals, isn't, contains, is above, is below, is present; paths like `shards[0].closed`). When the field can't be read (no answer, not JSON, missing or `null`), the monitor is **unknown** (not counted as uptime or downtime, and an ongoing outage stays open) or, if you prefer, down
 - **Fewer false alarms:** a monitor only counts as down after N failed checks in a row (2 by default), and can be marked **degraded** when it answers slower than a threshold
 - **Projects:** group monitors by site, app or server, each with a colour; filter the overview by project or status
 - **Overview:** an overall banner (all operational / N down), tiles (up, down, 30-day uptime, average response), and every monitor with its last 45 days of bars, uptime and response time
