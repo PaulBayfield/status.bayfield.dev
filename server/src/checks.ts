@@ -8,7 +8,7 @@ import { all, batch, first, run } from "./db.ts";
 import { config } from "./config.ts";
 import { notify, type Change } from "./notify.ts";
 import { checkExpiries, dueExpiries, type ExpiryNotice } from "./expiry.ts";
-import { IN_MAINTENANCE_SQL, inMaintenance } from "./maintenance.ts";
+import { IN_MAINTENANCE_SQL, inMaintenance, maintenanceNotices } from "./maintenance.ts";
 
 export type MonitorType = "http" | "tcp" | "heartbeat";
 export type Status = "pending" | "up" | "degraded" | "down";
@@ -273,7 +273,11 @@ export async function runDue(now = Date.now()) {
       }
     }
   }
-  if (real.length) await notify(real);
+  const notices = await maintenanceNotices(now).catch((e) => {
+    console.error("Maintenance notices failed:", e);
+    return [];
+  });
+  await notify([...real, ...notices]);
   await housekeeping(now);
   return { checked: due.length, changes: real.length };
 }

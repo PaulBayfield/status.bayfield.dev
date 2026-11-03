@@ -216,7 +216,7 @@ export interface Incident {
 
 export const WEBHOOK_KINDS = ["discord", "slack", "ntfy", "generic"] as const;
 export type WebhookKind = (typeof WEBHOOK_KINDS)[number];
-export const EVENTS = ["down", "up", "degraded", "expiry"] as const;
+export const EVENTS = ["down", "up", "degraded", "expiry", "post", "maintenance"] as const;
 export type WebhookEvent = (typeof EVENTS)[number];
 
 export interface Webhook {
@@ -233,12 +233,12 @@ export interface Webhook {
   template: MessageTemplate;
 }
 
-export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring"] as const;
+export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring", "post", "maintenance"] as const;
 /** down, back up (after down), back to normal (after degraded), degraded, a certificate or domain expiring. */
 export type MessageEvent = (typeof MESSAGE_EVENTS)[number];
 export const MESSAGE_DETAILS = ["target", "cause", "latency", "duration", "project", "time"] as const;
 export type MessageDetail = (typeof MESSAGE_DETAILS)[number];
-export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page", "what", "name", "expires", "days", "expiry", "issuer"] as const;
+export const PLACEHOLDERS = ["monitor", "project", "target", "status", "previous", "cause", "code", "latency", "duration", "time", "year", "link", "page", "what", "name", "expires", "days", "expiry", "issuer", "title", "update", "impact", "phase", "start", "end", "affects"] as const;
 
 /** What a webhook's notifications say and look like. Empty texts: the language's defaults. */
 export interface MessageTemplate {
@@ -253,7 +253,7 @@ export interface MessageTemplate {
     thumbnailUrl: string;
     footer: string;
     emoji: boolean;
-    colors: Record<"down" | "up" | "degraded", string>;
+    colors: Record<"down" | "up" | "degraded" | "maintenance", string>;
     mentions: Record<MessageEvent, string>;
   };
 }
@@ -350,6 +350,8 @@ export interface Maintenance {
   endsAt: string;
   author: string;
   monitors: number[];
+  /** Send webhook notifications: scheduled, started, over. */
+  notify: boolean;
 }
 
 export interface PublicMaintenance {

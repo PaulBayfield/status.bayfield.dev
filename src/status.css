@@ -1062,6 +1062,10 @@ a.sidebar-row {
 .event-dot.e-expiring {
   background: var(--degraded);
 }
+.event-dot.e-post,
+.event-dot.e-maintenance {
+  background: var(--maintenance);
+}
 .inline-number {
   display: flex;
   align-items: center;

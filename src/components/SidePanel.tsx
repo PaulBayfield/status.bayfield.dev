@@ -370,7 +370,7 @@ function WebhookForm({ webhook }: { webhook?: Webhook }) {
     url: webhook?.url ?? "",
     secret: "",
     clearSecret: false,
-    events: webhook?.events ?? ["down", "up", "expiry"],
+    events: webhook?.events ?? ["down", "up", "expiry", "post", "maintenance"],
     projects: webhook?.projects ?? [],
     enabled: webhook?.enabled ?? true,
   });

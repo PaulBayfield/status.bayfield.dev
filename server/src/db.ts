@@ -291,6 +291,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX maintenance_monitors_monitor ON maintenance_monitors(monitor_id);
   `,
+  /* 6: notifications for maintenance windows (scheduled, started, over) */ `
+  ALTER TABLE maintenances ADD COLUMN notify integer NOT NULL DEFAULT 1;
+  ALTER TABLE maintenances ADD COLUMN start_notified integer NOT NULL DEFAULT 0;
+  ALTER TABLE maintenances ADD COLUMN end_notified integer NOT NULL DEFAULT 0;
+  -- Windows that already started or ended aren't announced again.
+  UPDATE maintenances SET start_notified = 1 WHERE starts_at <= unixepoch() * 1000;
+  UPDATE maintenances SET end_notified = 1 WHERE ends_at <= unixepoch() * 1000;
+  `,
 ];
 
 let migrated: Promise<void> | null = null;

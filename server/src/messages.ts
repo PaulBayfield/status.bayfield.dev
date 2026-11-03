@@ -7,11 +7,11 @@
 // details, link buttons and a footer), like CROUStillantBot's: flag IS_COMPONENTS_V2 and
 // ?with_components=true, which lets a plain webhook send non-interactive components.
 
-import { all } from "./db.ts";
+import { all, first } from "./db.ts";
 import { config } from "./config.ts";
-import type { Change } from "./notify.ts";
+import type { Change, Notice } from "./notify.ts";
 
-export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring"] as const;
+export const MESSAGE_EVENTS = ["down", "up", "normal", "degraded", "expiring", "post", "maintenance"] as const;
 /** down, back up (after down), back to normal (after degraded), degraded, a certificate or domain expiring. */
 export type MessageEvent = (typeof MESSAGE_EVENTS)[number];
 export const LANGUAGES = ["en", "fr"] as const;
@@ -32,7 +32,7 @@ export interface Template {
     thumbnailUrl: string;
     footer: string;
     emoji: boolean;
-    colors: Record<"down" | "up" | "degraded", string>;
+    colors: Record<"down" | "up" | "degraded" | "maintenance", string>;
     /** Sent above the message for that event: <@&role id>, <@user id>, @here or @everyone. */
     mentions: Record<MessageEvent, string>;
   };
@@ -48,11 +48,18 @@ const TEXTS = {
       normal: { title: "{monitor} is back to normal", body: "Response times are back to normal." },
       degraded: { title: "{monitor} is slow", body: "{cause}" },
       expiring: { title: "The {what} of {monitor} {expiry}", body: "{name} · until {expires} · {issuer}" },
+      post: { title: "{title}", body: "**{status}** · {update}" },
+      maintenance: { title: "{phase}: {title}", body: "{start} → {end}\n{update}" },
     },
     labels: { target: "Target", cause: "Cause", latency: "Response time", duration: "Downtime", project: "Project", time: "Time" },
+    noticeLabels: { affects: "Affects", impact: "Impact" },
+    phase: { new: "New announcement", update: "Update", resolved: "Resolved", scheduled: "Maintenance scheduled", started: "Maintenance started", ended: "Maintenance over" },
+    postStatus: { investigating: "Investigating", identified: "Identified", monitoring: "Monitoring", resolved: "Resolved" },
+    impact: { none: "Notice", minor: "Minor", major: "Major" },
     what: { certificate: "SSL certificate", domain: "domain" },
     expiry: { future: "expires in {n} days", tomorrow: "expires tomorrow", today: "expires today", past: "expired {n} days ago", yesterday: "expired yesterday" },
     buttons: { monitor: "Open in Status", statusPage: "Status page" },
+    noticeButton: "Open in Status",
     footer: "Status · {time}",
     status: { up: "Up", down: "Down", degraded: "Degraded", pending: "Pending" },
     heartbeat: "Heartbeat",
@@ -65,11 +72,18 @@ const TEXTS = {
       normal: { title: "{monitor} fonctionne de nouveau normalement", body: "Les temps de réponse sont revenus à la normale." },
       degraded: { title: "{monitor} est lent", body: "{cause}" },
       expiring: { title: "Le {what} de {monitor} {expiry}", body: "{name} · jusqu'au {expires} · {issuer}" },
+      post: { title: "{title}", body: "**{status}** · {update}" },
+      maintenance: { title: "{phase} : {title}", body: "{start} → {end}\n{update}" },
     },
     labels: { target: "Cible", cause: "Cause", latency: "Temps de réponse", duration: "Durée de la panne", project: "Projet", time: "Heure" },
+    noticeLabels: { affects: "Concerne", impact: "Impact" },
+    phase: { new: "Nouvelle annonce", update: "Mise à jour", resolved: "Résolu", scheduled: "Maintenance planifiée", started: "Maintenance commencée", ended: "Maintenance terminée" },
+    postStatus: { investigating: "Analyse en cours", identified: "Cause identifiée", monitoring: "Sous surveillance", resolved: "Résolu" },
+    impact: { none: "Information", minor: "Mineur", major: "Majeur" },
     what: { certificate: "certificat SSL", domain: "nom de domaine" },
     expiry: { future: "expire dans {n} jours", tomorrow: "expire demain", today: "expire aujourd'hui", past: "a expiré il y a {n} jours", yesterday: "a expiré hier" },
     buttons: { monitor: "Ouvrir dans Status", statusPage: "Page de statut" },
+    noticeButton: "Ouvrir dans Status",
     footer: "Status · {time}",
     status: { up: "En ligne", down: "Hors service", degraded: "Dégradé", pending: "En attente" },
     heartbeat: "Heartbeat",
@@ -98,6 +112,14 @@ export const PLACEHOLDERS = [
   "days",
   "expiry",
   "issuer",
+  // Announcements and maintenance:
+  "title",
+  "update",
+  "impact",
+  "phase",
+  "start",
+  "end",
+  "affects",
 ] as const;
 
 /** The default texts of each language, for the editor's placeholders. */
@@ -111,7 +133,7 @@ export function emptyTemplate(language: Language = "en"): Template {
   const blank = { title: "", body: "" };
   return {
     language,
-    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank } },
+    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank }, post: { ...blank }, maintenance: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
     buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
@@ -120,8 +142,8 @@ export function emptyTemplate(language: Language = "en"): Template {
       thumbnailUrl: "",
       footer: "",
       emoji: true,
-      colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524" },
-      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "" },
+      colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524", maintenance: "#3e63dd" },
+      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "", post: "", maintenance: "" },
     },
   };
 }
@@ -177,6 +199,7 @@ export function parseTemplate(raw: unknown): Template {
       down: COLOR.test(String(colors.down)) ? String(colors.down) : base.discord.colors.down,
       up: COLOR.test(String(colors.up)) ? String(colors.up) : base.discord.colors.up,
       degraded: COLOR.test(String(colors.degraded)) ? String(colors.degraded) : base.discord.colors.degraded,
+      maintenance: COLOR.test(String(colors.maintenance)) ? String(colors.maintenance) : base.discord.colors.maintenance,
     },
     mentions: Object.fromEntries(MESSAGE_EVENTS.map((ev) => [ev, text(mentions[ev], 200).trim()])) as Template["discord"]["mentions"],
   };
@@ -198,7 +221,7 @@ export function storedTemplate(json: string): Template {
 export const messageEvent = (c: Change): MessageEvent =>
   c.expiry ? "expiring" : c.to === "down" ? "down" : c.to === "degraded" ? "degraded" : c.from === "degraded" ? "normal" : "up";
 
-const EMOJI: Record<MessageEvent, string> = { down: "🔴", up: "🟢", normal: "🟢", degraded: "🟡", expiring: "⏳" };
+const EMOJI: Record<MessageEvent, string> = { down: "🔴", up: "🟢", normal: "🟢", degraded: "🟡", expiring: "⏳", post: "📢", maintenance: "🔧" };
 
 /** Whole days until the expiry (negative once expired). */
 const daysLeft = (at: number, expiresAt: number) => Math.floor((expiresAt - at) / (24 * 60 * 60_000));
@@ -278,6 +301,13 @@ async function variables(c: Change, t: Template, kind: string, projects: number[
                 ? L.expiry.yesterday
                 : L.expiry.past.replace("{n}", String(-days)),
     issuer: x?.issuer ?? "",
+    title: "",
+    update: "",
+    impact: "",
+    phase: "",
+    start: "",
+    end: "",
+    affects: "",
   };
 }
 
@@ -315,10 +345,13 @@ ${body}`.includes(value) && details.push({ label: L.labels[d], value });
   const buttons: { label: string; url: string }[] = [];
   if (t.buttons.monitor.enabled) buttons.push({ label: fill(t.buttons.monitor.label || L.buttons.monitor, v), url: v.link });
   if (t.buttons.statusPage.enabled && v.page) buttons.push({ label: fill(t.buttons.statusPage.label || L.buttons.statusPage, v), url: v.page });
+  const expired = !!c.expiry?.expiresAt && c.expiry.expiresAt <= c.at;
   return {
     event: ev,
     /** An expiry warning for something already expired: shown in the "down" colour. */
-    expired: !!c.expiry?.expiresAt && c.expiry.expiresAt <= c.at,
+    expired,
+    /** The colour: down, degraded, up or maintenance. */
+    tone: (ev === "down" || expired ? "down" : ev === "degraded" || ev === "expiring" ? "degraded" : "up") as Tone,
     emoji: ev === "expiring" && c.expiry?.expiresAt && c.expiry.expiresAt <= c.at ? "🔴" : EMOJI[ev],
     title,
     body,
@@ -331,6 +364,86 @@ ${body}`.includes(value) && details.push({ label: L.labels[d], value });
 }
 
 export type Composed = Awaited<ReturnType<typeof compose>>;
+type Tone = "down" | "degraded" | "up" | "maintenance";
+
+/** Where a notice's button and {page} lead: the chosen page, or the notice's own (custom domain first). */
+async function noticePage(chosen: string, slug: string | null): Promise<string> {
+  const pick = chosen && (await first<{ slug: string }>("SELECT slug FROM status_pages WHERE slug = ?", chosen)) ? chosen : slug;
+  if (!pick) return "";
+  const row = await first<{ domain: string }>("SELECT domain FROM status_pages WHERE slug = ?", pick);
+  return row?.domain ? `https://${row.domain}` : `${config().publicUrl}/status/${pick}`;
+}
+
+/** An announcement or a maintenance window, as a message (same shape as a monitor's change). */
+export async function composeNotice(t: Template, n: Notice, kind: string) {
+  const ev: MessageEvent = n.kind;
+  const L = TEXTS[t.language];
+  const date = new Date(n.at);
+  const when = (ms: number | undefined) =>
+    ms === undefined
+      ? ""
+      : kind === "discord"
+        ? `<t:${Math.floor(ms / 1000)}:f>`
+        : `${new Intl.DateTimeFormat(t.language === "fr" ? "fr-FR" : "en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(ms))} UTC`;
+  const affects = n.monitors.map((m) => m.name).join(", ");
+  const projects = [...new Set(n.monitors.map((m) => m.projectId).filter((p): p is number => p !== null))];
+  const v: Vars = {
+    monitor: "",
+    project: projects.length === 1 ? await projectName(projects[0]) : "",
+    target: "",
+    status: n.kind === "post" ? L.postStatus[n.postStatus ?? "investigating"] : L.phase[n.phase],
+    previous: "",
+    cause: "",
+    code: "",
+    latency: "",
+    duration: "",
+    time: when(n.at),
+    link: `${config().publicUrl}${n.kind === "post" ? `/posts/${n.id}` : "/maintenance"}`,
+    page: await noticePage(t.buttons.statusPage.page, n.pageSlug),
+    year: String(date.getUTCFullYear()),
+    what: "",
+    name: "",
+    expires: "",
+    days: "",
+    expiry: "",
+    issuer: "",
+    title: n.title,
+    update: n.text,
+    impact: n.impact ? L.impact[n.impact] : "",
+    phase: L.phase[n.phase],
+    start: when(n.startsAt),
+    end: when(n.endsAt),
+    affects,
+  };
+  const msg = t.messages[ev];
+  const title = fill(msg.title || L.messages[ev].title, v);
+  const body = fill(msg.body || L.messages[ev].body, v);
+  const details: { label: string; value: string }[] = [];
+  const add = (on: boolean, label: string, value: string) => on && value && !`${title}\n${body}`.includes(value) && details.push({ label, value });
+  // "Target" stands for what a notice touches; project and time as for monitors.
+  add(t.details.target, L.noticeLabels.affects, affects);
+  add(n.kind === "post", L.noticeLabels.impact, v.impact);
+  add(t.details.project, L.labels.project, v.project);
+  add(t.details.time, L.labels.time, v.time);
+  const buttons: { label: string; url: string }[] = [];
+  if (t.buttons.monitor.enabled) buttons.push({ label: fill(t.buttons.monitor.label || L.noticeButton, v), url: v.link });
+  if (t.buttons.statusPage.enabled && v.page) buttons.push({ label: fill(t.buttons.statusPage.label || L.buttons.statusPage, v), url: v.page });
+  const done = n.phase === "resolved" || n.phase === "ended";
+  const tone: Tone = done ? "up" : n.kind === "maintenance" ? "maintenance" : n.impact === "major" ? "down" : n.impact === "minor" ? "degraded" : "maintenance";
+  return {
+    event: ev,
+    expired: false,
+    tone,
+    emoji: done ? "✅" : n.kind === "post" ? (n.impact === "major" ? "🔴" : n.impact === "minor" ? "🟠" : "📢") : EMOJI[ev],
+    title,
+    body,
+    details,
+    buttons,
+    footer: fill(t.discord.footer || L.footer, v),
+    mention: fill(t.discord.mentions[ev], v),
+    vars: v,
+  };
+}
 
 const C = { container: 17, section: 9, text: 10, thumbnail: 11, separator: 14, row: 1, button: 2 } as const;
 const LINK_BUTTON = 5;
@@ -338,7 +451,7 @@ const IS_COMPONENTS_V2 = 1 << 15;
 
 /** Discord: one container in the event's colour, like a bot's components message. */
 export function discordBody(t: Template, m: Composed) {
-  const hex = m.event === "down" || m.expired ? t.discord.colors.down : m.event === "degraded" || m.event === "expiring" ? t.discord.colors.degraded : t.discord.colors.up;
+  const hex = t.discord.colors[m.tone];
   const color = parseInt(hex.slice(1), 16);
   const headline = `## ${t.discord.emoji ? `${m.emoji} ` : ""}${m.title}${m.body ? `\n${m.body}` : ""}`.slice(0, 3000);
   const inside: unknown[] = [
@@ -371,9 +484,12 @@ export function discordUrl(url: string): string {
   return u.toString();
 }
 
+/** Slack's mrkdwn: *bold*, _italic_, <url|text> (the texts are written in Discord's markdown). */
+const toSlack = (s: string) => s.replace(/\*\*(.+?)\*\*/g, "*$1*").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, "<$2|$1>");
+
 export function slackText(m: Composed): string {
-  const lines = [`${m.emoji} *${m.title}*`];
-  if (m.body) lines.push(m.body);
+  const lines = [`${m.emoji} *${toSlack(m.title).replace(/\*/g, "")}*`];
+  if (m.body) lines.push(toSlack(m.body));
   for (const d of m.details) lines.push(`*${d.label}:* ${d.value}`);
   if (m.buttons.length) lines.push(m.buttons.map((b) => `<${b.url}|${b.label}>`).join(" · "));
   return lines.join("\n");
@@ -386,15 +502,17 @@ export function ntfyRequest(url: string, m: Composed) {
   const topic = parts.pop() ?? "";
   u.pathname = `/${parts.join("/")}`;
   u.search = "";
-  const tags = { down: "rotating_light", up: "white_check_mark", normal: "white_check_mark", degraded: "warning", expiring: "hourglass" }[m.event];
+  const tags = { down: "rotating_light", up: "white_check_mark", normal: "white_check_mark", degraded: "warning", expiring: "hourglass", post: "loudspeaker", maintenance: "wrench" }[m.event];
   return {
     url: u.toString(),
     body: {
       topic,
+      // The texts may use markdown (**bold**, links): ntfy renders it in its apps.
+      markdown: true,
       title: m.title,
       message: [m.body, ...m.details.map((d) => `${d.label}: ${d.value}`)].filter(Boolean).join("\n") || m.title,
       tags: [tags],
-      priority: m.event === "down" || m.expired ? 5 : m.event === "expiring" ? 4 : 3,
+      priority: m.tone === "down" ? 5 : m.event === "expiring" ? 4 : 3,
       ...(m.buttons[0] ? { click: m.buttons[0].url } : {}),
       actions: m.buttons.slice(0, 3).map((b) => ({ action: "view", label: b.label, url: b.url })),
     },

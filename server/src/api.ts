@@ -7,7 +7,7 @@ import { randomToken, sha256 } from "./crypto.ts";
 import { HttpError, bad, body, id, int, rateLimit, str } from "./http.ts";
 import { requireAdmin, requireCollaborator, requireUser, signOutEverywhere, type AppEnv } from "./auth.ts";
 import { checkNow, parseHostPort, type Monitor, type MonitorType } from "./checks.ts";
-import { EVENTS, WEBHOOK_KINDS, notify, request, send, testChange, type Webhook } from "./notify.ts";
+import { EVENTS, WEBHOOK_KINDS, notify, request, send, testSubject, type Webhook } from "./notify.ts";
 import { DETAILS, LANGUAGES, MESSAGE_EVENTS, PLACEHOLDERS, TemplateError, defaultTexts, parseTemplate, storedTemplate, type MessageEvent } from "./messages.ts";
 import { daysByMonitor, expiryView, latencySeries, monitorView, uptime } from "./views.ts";
 import { certificateTarget, checkExpiries, domainTarget, expiriesOf } from "./expiry.ts";
@@ -479,7 +479,7 @@ api.post("/webhooks/preview", async (c) => {
   const url = kind === "ntfy" ? "https://ntfy.sh/my-topic" : "https://example.com/webhook";
   // The webhook being edited, for the projects a test's status page comes from.
   const w = typeof b.webhookId === "number" ? await first<Webhook>("SELECT projects FROM webhooks WHERE id = ?", b.webhookId) : undefined;
-  const r = await request({ kind, url, secret: "", template: "", projects: w?.projects ?? "" }, testChange(messageEventOf(b.event)), template(b.template));
+  const r = await request({ kind, url, secret: "", template: "", projects: w?.projects ?? "" }, testSubject(messageEventOf(b.event)), template(b.template));
   // Discord only takes buttons to public https addresses: none from a local Status.
   return c.json({ kind, body: r.preview, buttonsNeedHttps: kind === "discord" && !/^https:\/\/(?!localhost|127\.)/.test(config().publicUrl) });
 });
@@ -490,7 +490,7 @@ api.post("/webhooks/:id/test", requireCollaborator, async (c) => {
   const w = await first<Webhook>("SELECT * FROM webhooks WHERE id = ?", id(c));
   if (!w) throw new HttpError(404, "Not found");
   const b = await c.req.json().catch(() => ({}) as Record<string, unknown>);
-  const error = await send(w, testChange(messageEventOf(b.event)), b.template !== undefined ? template(b.template) : undefined);
+  const error = await send(w, testSubject(messageEventOf(b.event)), b.template !== undefined ? template(b.template) : undefined);
   await run("UPDATE webhooks SET last_sent_at = ?, last_error = ? WHERE id = ?", Date.now(), error ?? "", w.id);
   if (error) throw bad(`The webhook failed: ${error}`);
   return c.json({ ok: true });

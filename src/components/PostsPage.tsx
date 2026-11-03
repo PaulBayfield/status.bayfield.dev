@@ -116,6 +116,7 @@ export function PostPage({ id }: { id: number }) {
   const post = posts.data?.find((p) => p.id === id);
   const [status, setStatus] = useState<PostStatus | null>(null);
   const [text, setText] = useState("");
+  const [notifyUpdate, setNotifyUpdate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<number | null>(null);
   const editor = canContribute(me);
@@ -132,7 +133,7 @@ export function PostPage({ id }: { id: number }) {
   const postUpdate = async () => {
     setBusy(true);
     try {
-      await api(`${POSTS}/${post.id}/updates`, { method: "POST", body: { status: next, body: text } });
+      await api(`${POSTS}/${post.id}/updates`, { method: "POST", body: { status: next, body: text, notify: notifyUpdate } });
       setText("");
       setStatus(null);
       reload();
@@ -219,6 +220,10 @@ export function PostPage({ id }: { id: number }) {
           <div className="form-actions">
             <span className="form-hint">{t("markdownHint")}</span>
             <div className="toolbar-spacer" />
+            <label className="checkbox small" title={t("notifyWebhooksHint")}>
+              <input type="checkbox" checked={notifyUpdate} onChange={(e) => setNotifyUpdate(e.target.checked)} />
+              {t("notifyWebhooks")}
+            </label>
             <button className="primary-button" disabled={busy || !text.trim()} onClick={() => void postUpdate()}>
               {busy && <Spinner />}
               {t("postUpdateButton")}
@@ -308,6 +313,7 @@ export function PostForm({ post }: { post?: Post }) {
   const [body, setBody] = useState("");
   const [pageIds, setPageIds] = useState<number[] | null>(post?.pages ?? null);
   const [monitorIds, setMonitorIds] = useState<number[]>(post?.monitors ?? []);
+  const [notifyNew, setNotifyNew] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -320,7 +326,7 @@ export function PostForm({ post }: { post?: Post }) {
     try {
       const saved = await api<Post>(post ? `${POSTS}/${post.id}` : POSTS, {
         method: post ? "PATCH" : "POST",
-        body: post ? { title, impact, pages: chosen, monitors: monitorIds } : { title, impact, status, body, pages: chosen, monitors: monitorIds },
+        body: post ? { title, impact, pages: chosen, monitors: monitorIds } : { title, impact, status, body, pages: chosen, monitors: monitorIds, notify: notifyNew },
       });
       invalidate(POSTS);
       window.dispatchEvent(new Event("status:posts"));
@@ -380,6 +386,15 @@ export function PostForm({ post }: { post?: Post }) {
           <MonitorChecklist value={monitorIds} onChange={setMonitorIds} />
           <span className="form-hint">{t("postMonitorsHint")}</span>
         </div>
+        {!post && (
+          <>
+            <label className="checkbox">
+              <input type="checkbox" checked={notifyNew} onChange={(e) => setNotifyNew(e.target.checked)} />
+              {t("notifyWebhooks")}
+            </label>
+            <span className="form-hint">{t("notifyWebhooksHint")}</span>
+          </>
+        )}
       </FormShell>
       {deleting && post && (
         <ConfirmDialog

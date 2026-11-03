@@ -151,6 +151,7 @@ export function MaintenanceForm({ maintenance }: { maintenance?: Maintenance }) 
   const [startsAt, setStartsAt] = useState(toLocal(maintenance ? new Date(maintenance.startsAt) : start));
   const [endsAt, setEndsAt] = useState(toLocal(maintenance ? new Date(maintenance.endsAt) : new Date(start.getTime() + 3_600_000)));
   const [monitorIds, setMonitorIds] = useState<number[]>(maintenance?.monitors ?? []);
+  const [notifyOn, setNotifyOn] = useState(maintenance?.notify ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -162,7 +163,7 @@ export function MaintenanceForm({ maintenance }: { maintenance?: Maintenance }) 
     try {
       await api(maintenance ? `${MAINTENANCE}/${maintenance.id}` : MAINTENANCE, {
         method: maintenance ? "PATCH" : "POST",
-        body: { title, description, startsAt: fromLocal(startsAt), endsAt: fromLocal(endsAt), monitors: monitorIds },
+        body: { title, description, startsAt: fromLocal(startsAt), endsAt: fromLocal(endsAt), monitors: monitorIds, notify: notifyOn },
       });
       invalidate(MAINTENANCE);
       window.dispatchEvent(new Event("status:maintenance"));
@@ -212,6 +213,11 @@ export function MaintenanceForm({ maintenance }: { maintenance?: Maintenance }) 
           <MonitorChecklist value={monitorIds} onChange={setMonitorIds} />
           <span className="form-hint">{t("maintenanceMonitorsHint")}</span>
         </div>
+        <label className="checkbox">
+          <input type="checkbox" checked={notifyOn} onChange={(e) => setNotifyOn(e.target.checked)} />
+          {t("notifyWebhooks")}
+        </label>
+        <span className="form-hint">{t("maintenanceNotifyHint")}</span>
       </FormShell>
       {deleting && maintenance && (
         <ConfirmDialog

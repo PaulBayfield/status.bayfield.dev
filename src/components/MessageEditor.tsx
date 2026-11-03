@@ -261,10 +261,10 @@ export function MessageEditor({ id }: { id: number }) {
               <div className="form-field">
                 <span className="form-label">{t("dcColors")}</span>
                 <div className="color-inputs">
-                  {(["down", "degraded", "up"] as const).map((k) => (
+                  {(["down", "degraded", "up", "maintenance"] as const).map((k) => (
                     <label key={k} className="color-input">
                       <input type="color" value={d.discord.colors[k]} disabled={!editor} onChange={(e) => update((t) => (t.discord.colors[k] = e.target.value))} />
-                      {t(`msgEvent_${k}`)}
+                      {t(k === "maintenance" ? "msgColorMaintenance" : `msgEvent_${k}`)}
                     </label>
                   ))}
                 </div>
@@ -341,7 +341,7 @@ function blankTemplate(language: "en" | "fr"): MessageTemplate {
   const blank = { title: "", body: "" };
   return {
     language,
-    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank } },
+    messages: { down: { ...blank }, up: { ...blank }, normal: { ...blank }, degraded: { ...blank }, expiring: { ...blank }, post: { ...blank }, maintenance: { ...blank } },
     details: { target: true, cause: true, latency: true, duration: true, project: false, time: false },
     buttons: { monitor: { enabled: true, label: "" }, statusPage: { enabled: false, label: "", page: "" } },
     discord: {
@@ -350,8 +350,8 @@ function blankTemplate(language: "en" | "fr"): MessageTemplate {
       thumbnailUrl: "",
       footer: "",
       emoji: true,
-      colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524" },
-      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "" },
+      colors: { down: "#e5484d", up: "#30a46c", degraded: "#f5a524", maintenance: "#3e63dd" },
+      mentions: { down: "", up: "", normal: "", degraded: "", expiring: "", post: "", maintenance: "" },
     },
   };
 }

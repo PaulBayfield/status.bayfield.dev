@@ -7,6 +7,7 @@ import { all, batch, first, run, type Param } from "./db.ts";
 import { HttpError, bad, body, id, str } from "./http.ts";
 import { requireCollaborator, type AppEnv } from "./auth.ts";
 import { forgetPages } from "./public.ts";
+import { notify, type Notice } from "./notify.ts";
 
 export const POST_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
@@ -121,6 +122,22 @@ async function view(p: Row) {
   };
 }
 
+/** A post as a notification: its latest update, monitors, and the page to link (the default first). */
+async function notice(p: Row, phase: Notice["phase"], text: string): Promise<Notice> {
+  const monitors = await all<{ id: number; name: string; projectId: number | null }>(
+    "SELECT m.id, m.name, m.project_id FROM monitors m JOIN post_monitors pm ON pm.monitor_id = m.id WHERE pm.post_id = ? ORDER BY lower(m.name)",
+    p.id,
+  );
+  const page = await first<{ slug: string }>(
+    "SELECT s.slug FROM status_pages s JOIN post_pages pp ON pp.page_id = s.id WHERE pp.post_id = ? ORDER BY s.is_default DESC, s.id LIMIT 1",
+    p.id,
+  );
+  return { kind: "post", phase, id: p.id, title: p.title, text, impact: p.impact, postStatus: p.status, monitors, pageSlug: page?.slug ?? null, at: Date.now() };
+}
+
+const send = (c: { executionCtx: { waitUntil(p: Promise<unknown>): void } }, n: Promise<Notice>) =>
+  c.executionCtx.waitUntil(n.then((x) => notify([x])).catch((e) => console.error(e)));
+
 const getPost = async (pid: number) => {
   const p = await first<Row>("SELECT * FROM posts WHERE id = ?", pid);
   if (!p) throw new HttpError(404, "Not found");
@@ -161,7 +178,10 @@ postRoutes.post("/", requireCollaborator, async (c) => {
     ...monitors.map((m): [string, ...Param[]] => ["INSERT INTO post_monitors (post_id, monitor_id) VALUES (?, ?)", pid, m]),
   ]);
   await refreshPages(c, pages);
-  return c.json(await view(await getPost(pid)), 201);
+  const created = await getPost(pid);
+  // Webhooks hear about it unless the form says not to.
+  if (b.notify !== false) send(c, notice(created, st === "resolved" ? "resolved" : "new", text));
+  return c.json(await view(created), 201);
 });
 
 /** Title, impact, pages, monitors. The status changes through updates. */
@@ -201,7 +221,9 @@ postRoutes.post("/:id/updates", requireCollaborator, async (c) => {
     ["UPDATE posts SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ?", st, now, st === "resolved" ? (p.resolvedAt ?? now) : null, p.id],
   ]);
   await refreshPages(c, (await details([p.id])).pages.get(p.id) ?? []);
-  return c.json(await view(await getPost(p.id)), 201);
+  const updated = await getPost(p.id);
+  if (b.notify !== false) send(c, notice(updated, st === "resolved" ? "resolved" : "update", text));
+  return c.json(await view(updated), 201);
 });
 
 postRoutes.delete("/:id/updates/:update", requireCollaborator, async (c) => {

@@ -521,6 +521,24 @@ const en = {
   badge_uptime: "Uptime",
   badge_response: "Response",
   badgeUptimeHint: "30 days; ?days=1, 7 or 90 for another period.",
+  // Notifications for announcements and maintenance
+  event_post: "Announcements",
+  event_maintenance: "Maintenance",
+  eventLong_post: "An announcement is published or updated",
+  eventLong_maintenance: "Maintenance is scheduled, starts or ends",
+  msgEvent_post: "Announcement",
+  msgEvent_maintenance: "Maintenance",
+  msgColorMaintenance: "Maintenance and notices",
+  ph_title: "the announcement's or maintenance's title",
+  ph_update: "the update's text, or the description",
+  ph_impact: "the announcement's impact",
+  ph_phase: "new, update, resolved, scheduled, started, over",
+  ph_start: "when the maintenance starts",
+  ph_end: "when it ends",
+  ph_affects: "the monitors it concerns",
+  notifyWebhooks: "Notify webhooks",
+  notifyWebhooksHint: "Sent to the webhooks with \"Announcements\" ticked (for their projects, or all when it names no monitor).",
+  maintenanceNotifyHint: "When it's scheduled, when it starts and when it's over, to the webhooks with \"Maintenance\" ticked.",
 };
 
 export type StringKey = keyof typeof en;
@@ -1036,6 +1054,24 @@ const fr: Record<StringKey, string> = {
   badge_uptime: "Disponibilité",
   badge_response: "Réponse",
   badgeUptimeHint: "30 jours ; ?days=1, 7 ou 90 pour une autre période.",
+  // Notifications for announcements and maintenance
+  event_post: "Annonces",
+  event_maintenance: "Maintenance",
+  eventLong_post: "Une annonce est publiée ou mise à jour",
+  eventLong_maintenance: "Une maintenance est planifiée, commence ou se termine",
+  msgEvent_post: "Annonce",
+  msgEvent_maintenance: "Maintenance",
+  msgColorMaintenance: "Maintenance et informations",
+  ph_title: "le titre de l'annonce ou de la maintenance",
+  ph_update: "le texte de la mise à jour, ou la description",
+  ph_impact: "l'impact de l'annonce",
+  ph_phase: "nouvelle, mise à jour, résolue, planifiée, commencée, terminée",
+  ph_start: "le début de la maintenance",
+  ph_end: "sa fin",
+  ph_affects: "les moniteurs concernés",
+  notifyWebhooks: "Notifier les webhooks",
+  notifyWebhooksHint: "Envoyé aux webhooks qui ont « Annonces » coché (pour leurs projets, ou tous si elle ne cite aucun moniteur).",
+  maintenanceNotifyHint: "Quand elle est planifiée, quand elle commence et quand elle se termine, aux webhooks qui ont « Maintenance » coché.",
 };
 
 export type Lang = "en" | "fr";

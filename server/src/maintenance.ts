@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { all, batch, first, run, type Param } from "./db.ts";
 import { HttpError, bad, body, id, str } from "./http.ts";
 import { requireCollaborator, type AppEnv } from "./auth.ts";
+import { notify, type Notice } from "./notify.ts";
 
 interface Row {
   id: number;
@@ -15,6 +16,10 @@ interface Row {
   endsAt: number;
   author: string;
   createdAt: number;
+  /** Send webhook notifications: scheduled, started, over. */
+  notify: number;
+  startNotified: number;
+  endNotified: number;
 }
 
 const iso = (t: number) => new Date(t).toISOString();
@@ -51,8 +56,41 @@ const view = (w: Row, monitors: number[]) => ({
   startsAt: iso(w.startsAt),
   endsAt: iso(w.endsAt),
   author: w.author,
+  notify: !!w.notify,
   monitors,
 });
+
+/** A window as a notification, with its monitors and the status page to link. */
+async function notice(w: Row, phase: Notice["phase"]): Promise<Notice> {
+  const monitors = await all<{ id: number; name: string; projectId: number | null }>(
+    "SELECT m.id, m.name, m.project_id FROM monitors m JOIN maintenance_monitors mm ON mm.monitor_id = m.id WHERE mm.maintenance_id = ? ORDER BY lower(m.name)",
+    w.id,
+  );
+  const page = monitors.length
+    ? await first<{ slug: string }>(
+        `SELECT p.slug FROM status_pages p JOIN status_page_groups g ON g.page_id = p.id JOIN status_page_monitors l ON l.group_id = g.id
+         WHERE l.monitor_id IN (${monitors.map(() => "?").join(",")}) ORDER BY p.is_default DESC, p.id LIMIT 1`,
+        ...monitors.map((m) => m.id),
+      )
+    : undefined;
+  return { kind: "maintenance", phase, id: w.id, title: w.title, text: w.description, startsAt: w.startsAt, endsAt: w.endsAt, monitors, pageSlug: page?.slug ?? null, at: Date.now() };
+}
+
+/** The cron: windows that started or ended since the last run, as notifications (each sent once). */
+export async function maintenanceNotices(now = Date.now()): Promise<Notice[]> {
+  const rows = await all<Row>("SELECT * FROM maintenances WHERE (start_notified = 0 AND starts_at <= ?) OR (end_notified = 0 AND ends_at <= ?)", now, now);
+  const out: Notice[] = [];
+  for (const w of rows) {
+    const started = !w.startNotified && w.startsAt <= now;
+    const ended = !w.endNotified && w.endsAt <= now;
+    await run("UPDATE maintenances SET start_notified = 1, end_notified = ? WHERE id = ?", ended ? 1 : w.endNotified, w.id);
+    if (!w.notify) continue;
+    // Missed both (the window was short, or saved already over): only say it's over.
+    if (ended) out.push(await notice(w, "ended"));
+    else if (started) out.push(await notice(w, "started"));
+  }
+  return out;
+}
 
 /** For a status page: windows over these monitors that are running or start within 30 days. */
 export async function maintenancesFor(monitorIds: number[], now = Date.now()) {
@@ -105,7 +143,8 @@ async function parse(b: Record<string, unknown>, old?: Row) {
     monitors = [...new Set(b.monitors.filter((x): x is number => typeof x === "number" && known.has(x)))];
     if (!monitors.length) throw bad("Pick the monitors it concerns");
   }
-  return { title, description: b.description !== undefined ? str(b.description, 4000) : (old?.description ?? ""), startsAt, endsAt, monitors };
+  const notifyOn = b.notify === undefined ? (old ? !!old.notify : true) : !!b.notify;
+  return { title, description: b.description !== undefined ? str(b.description, 4000) : (old?.description ?? ""), startsAt, endsAt, monitors, notify: notifyOn };
 }
 
 const links = (wid: number, monitors: number[]): [string, ...Param[]][] => [
@@ -124,16 +163,23 @@ maintenanceRoutes.post("/", requireCollaborator, async (c) => {
   const v = await parse(await body(c));
   if (!v.monitors) throw bad("Pick the monitors it concerns");
   const { id: wid } = await run(
-    "INSERT INTO maintenances (title, description, starts_at, ends_at, author, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO maintenances (title, description, starts_at, ends_at, author, created_at, notify) VALUES (?, ?, ?, ?, ?, ?, ?)",
     v.title,
     v.description,
     v.startsAt,
     v.endsAt,
     c.get("user").name,
     Date.now(),
+    v.notify,
   );
   await batch(links(wid, v.monitors));
-  return c.json(view((await first<Row>("SELECT * FROM maintenances WHERE id = ?", wid))!, v.monitors), 201);
+  const row = (await first<Row>("SELECT * FROM maintenances WHERE id = ?", wid))!;
+  // Announced now if it's ahead; the start and the end come from the cron.
+  if (v.notify && v.startsAt > Date.now()) {
+    const n = await notice(row, "scheduled");
+    c.executionCtx.waitUntil(notify([n]).catch((e) => console.error(e)));
+  }
+  return c.json(view(row, v.monitors), 201);
 });
 
 maintenanceRoutes.patch("/:id", requireCollaborator, async (c) => {
@@ -141,7 +187,21 @@ maintenanceRoutes.patch("/:id", requireCollaborator, async (c) => {
   if (!old) throw new HttpError(404, "Not found");
   const v = await parse(await body(c), old);
   await batch([
-    ["UPDATE maintenances SET title = ?, description = ?, starts_at = ?, ends_at = ? WHERE id = ?", v.title, v.description, v.startsAt, v.endsAt, old.id],
+    [
+      // Moved later: its start and end are announced again when they come.
+      `UPDATE maintenances SET title = ?, description = ?, starts_at = ?, ends_at = ?, notify = ?,
+         start_notified = CASE WHEN ? > ? THEN 0 ELSE start_notified END, end_notified = CASE WHEN ? > ? THEN 0 ELSE end_notified END WHERE id = ?`,
+      v.title,
+      v.description,
+      v.startsAt,
+      v.endsAt,
+      v.notify,
+      v.startsAt,
+      Date.now(),
+      v.endsAt,
+      Date.now(),
+      old.id,
+    ],
     ...(v.monitors ? links(old.id, v.monitors) : []),
   ]);
   const mons = await monitorsOf([old.id]);
