@@ -410,7 +410,7 @@ a.sidebar-row {
 }
 .monitor-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1.4fr) 84px 76px;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1.4fr) max-content max-content;
   align-items: center;
   gap: 20px;
   padding: 12px 16px;
@@ -1895,8 +1895,19 @@ a.sidebar-row {
   gap: 4px;
 }
 .monitor-row.public-row {
-  grid-template-columns: minmax(180px, 1fr) minmax(200px, 2fr) 96px;
+  grid-template-columns: minmax(200px, 1fr) minmax(160px, 2fr) max-content;
   cursor: default;
+}
+/* The status line wraps instead of cutting the "Response time" button off. */
+.monitor-row.public-row .target {
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow: visible;
+  row-gap: 2px;
+}
+.monitor-row.public-row .chart-toggle {
+  margin-left: 4px;
+  white-space: nowrap;
 }
 .monitor-row.public-row:hover {
   background: none;
@@ -1936,7 +1947,7 @@ a.sidebar-row {
 @media (max-width: 900px) {
   /* Visitors keep the bars: they move under the name. */
   .monitor-row.public-row {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) max-content;
     grid-template-areas: "main stat" "bars bars";
     row-gap: 10px;
   }
@@ -1953,7 +1964,7 @@ a.sidebar-row {
 
 @media (max-width: 1100px) {
   .monitor-row {
-    grid-template-columns: minmax(160px, 1fr) minmax(120px, 1fr) 76px 70px;
+    grid-template-columns: minmax(160px, 1fr) minmax(120px, 1fr) max-content max-content;
     gap: 14px;
   }
   .two-columns {
@@ -1969,7 +1980,7 @@ a.sidebar-row {
 }
 @media (max-width: 900px) {
   .monitor-row {
-    grid-template-columns: 1fr 76px 70px;
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
   }
   .hide-narrow {
     display: none;
@@ -1977,7 +1988,7 @@ a.sidebar-row {
 }
 @media (max-width: 760px) {
   .monitor-row {
-    grid-template-columns: 1fr 76px;
+    grid-template-columns: minmax(0, 1fr) max-content;
     padding: 12px;
   }
   .monitor-row .hide-mobile,
