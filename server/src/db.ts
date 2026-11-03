@@ -299,6 +299,15 @@ const MIGRATIONS: string[] = [
   UPDATE maintenances SET start_notified = 1 WHERE starts_at <= unixepoch() * 1000;
   UPDATE maintenances SET end_notified = 1 WHERE ends_at <= unixepoch() * 1000;
   `,
+  /* 7: JSON checks: the status comes from a field of the response (extra.database is true) */ `
+  -- A path into the JSON answer (extra.database, shards[0].closed). Empty: no JSON check.
+  ALTER TABLE monitors ADD COLUMN json_path text NOT NULL DEFAULT '';
+  -- true, false, equals, not_equals, contains, gt, lt, exists.
+  ALTER TABLE monitors ADD COLUMN json_op text NOT NULL DEFAULT 'true';
+  ALTER TABLE monitors ADD COLUMN json_value text NOT NULL DEFAULT '';
+  -- When the field can't be read (no answer, not JSON, missing or null): unknown or down.
+  ALTER TABLE monitors ADD COLUMN json_missing text NOT NULL DEFAULT 'unknown';
+  `,
 ];
 
 let migrated: Promise<void> | null = null;

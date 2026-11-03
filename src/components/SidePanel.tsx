@@ -1,7 +1,7 @@
 // The right-hand panel: the add/edit forms (monitor, webhook, project), otherwise the activity feed.
 
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import { api, EVENTS, MONITOR_TYPES, WEBHOOK_KINDS, type Incident, type Monitor, type MonitorType, type PageDisplay, type Project, type StatusPage, type Webhook, type WebhookKind, registeredDomain } from "../lib/api";
+import { api, EVENTS, MONITOR_TYPES, WEBHOOK_KINDS, type Incident, type Monitor, type MonitorType, type JsonOp, type PageDisplay, type Project, type StatusPage, type Webhook, type WebhookKind, JSON_OPS, JSON_OPS_WITH_VALUE, registeredDomain } from "../lib/api";
 import { useApp } from "../lib/app";
 import { invalidate, useApi } from "../lib/hooks";
 import { useSettings } from "../lib/settings";
@@ -178,6 +178,10 @@ function MonitorForm({ monitor, projectId }: { monitor?: Monitor; projectId?: nu
     method: monitor?.method ?? "GET",
     expectedStatus: monitor?.expectedStatus ?? "200-299",
     keyword: monitor?.keyword ?? "",
+    jsonPath: monitor?.jsonPath ?? "",
+    jsonOp: (monitor?.jsonOp ?? "true") as JsonOp,
+    jsonValue: monitor?.jsonValue ?? "",
+    jsonMissing: (monitor?.jsonMissing ?? "unknown") as "unknown" | "down",
     headers: monitor?.headers ?? "",
     followRedirects: monitor?.followRedirects ?? true,
     timeoutMs: monitor?.timeoutMs ?? 10_000,
@@ -267,6 +271,49 @@ function MonitorForm({ monitor, projectId }: { monitor?: Monitor; projectId?: nu
         <Field label={t("keyword")} hint={t("keywordHint")}>
           <input className="text-field" value={form.keyword} onChange={(e) => set({ keyword: e.target.value })} placeholder={t("optional")} />
         </Field>
+      )}
+      {form.type === "http" && (
+        <div className="form-field">
+          <span className="form-label">{t("jsonCheck")}</span>
+          <input
+            className="text-field mono-field"
+            value={form.jsonPath}
+            spellCheck={false}
+            aria-label={t("jsonPath")}
+            placeholder="extra.database"
+            onChange={(e) => set({ jsonPath: e.target.value.trim() })}
+          />
+          {form.jsonPath && (
+            <>
+              <div className="json-rule">
+                <select value={form.jsonOp} aria-label={t("jsonOperator")} onChange={(e) => set({ jsonOp: e.target.value as JsonOp })}>
+                  {JSON_OPS.map((op) => (
+                    <option key={op} value={op}>
+                      {t(`jsonOp_${op}`)}
+                    </option>
+                  ))}
+                </select>
+                {JSON_OPS_WITH_VALUE.includes(form.jsonOp) && (
+                  <input
+                    className="text-field"
+                    value={form.jsonValue}
+                    aria-label={t("jsonValue")}
+                    placeholder={form.jsonOp === "gt" || form.jsonOp === "lt" ? "100" : "online"}
+                    onChange={(e) => set({ jsonValue: e.target.value })}
+                  />
+                )}
+              </div>
+              <label className="inline-select">
+                {t("jsonMissing")}
+                <select value={form.jsonMissing} onChange={(e) => set({ jsonMissing: e.target.value as "unknown" | "down" })}>
+                  <option value="unknown">{t("jsonMissing_unknown")}</option>
+                  <option value="down">{t("jsonMissing_down")}</option>
+                </select>
+              </label>
+            </>
+          )}
+          <span className="form-hint">{form.jsonPath ? t("jsonCheckHintOn") : t("jsonCheckHint")}</span>
+        </div>
       )}
 
       {form.type !== "heartbeat" && (

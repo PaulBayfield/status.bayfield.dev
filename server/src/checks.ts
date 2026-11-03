@@ -46,10 +46,19 @@ export interface Monitor {
   domainCheck: number;
   domainName: string;
   expiryWarnDays: number;
+  /** HTTP monitors: the status comes from a field of the JSON answer. Empty path: no JSON check. */
+  jsonPath: string;
+  jsonOp: JsonOp;
+  jsonValue: string;
+  jsonMissing: "unknown" | "down";
 }
 
+export const JSON_OPS = ["true", "false", "equals", "not_equals", "contains", "gt", "lt", "exists"] as const;
+export type JsonOp = (typeof JSON_OPS)[number];
+
 export interface Result {
-  status: Outcome;
+  /** unknown: the check couldn't tell (a JSON field that can't be read). Neither uptime nor downtime. */
+  status: Outcome | "unknown";
   latency: number | null;
   code: number | null;
   message: string;
@@ -86,8 +95,51 @@ export function parseHeaders(text: string): [string, string][] {
 const describe = (e: unknown): string => {
   const err = e as Error;
   if (err?.name === "TimeoutError" || err?.name === "AbortError") return "Timed out";
+  // Workers' fetch says only this when the host doesn't resolve or the connection fails.
+  if (/^internal error; reference = /.test(err?.message ?? "")) return "Couldn't connect (unknown host, or the network refused it)";
   return (err?.message || String(e)).slice(0, 300);
 };
+
+/** "extra.database", "shards[0].closed", "a.b.0" → the value, or undefined. */
+export function jsonAt(data: unknown, path: string): unknown {
+  const keys = path
+    .replace(/\[(\d+)\]/g, ".$1")
+    .split(".")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  let v: unknown = data;
+  for (const k of keys) {
+    if (v === null || typeof v !== "object") return undefined;
+    v = (v as Record<string, unknown>)[k];
+  }
+  return v;
+}
+
+const show = (v: unknown) => (typeof v === "string" ? `"${v.slice(0, 60)}"` : JSON.stringify(v)?.slice(0, 60) ?? "undefined");
+
+/** Does the value pass? The message says what was found. */
+export function jsonRule(value: unknown, op: JsonOp, expected: string, path: string): { ok: boolean; message: string } {
+  const num = Number(expected);
+  const loose = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
+  const ok =
+    op === "true"
+      ? value === true
+      : op === "false"
+        ? value === false
+        : op === "exists"
+          ? true
+          : op === "equals"
+            ? loose(value) === expected
+            : op === "not_equals"
+              ? loose(value) !== expected
+              : op === "contains"
+                ? (typeof value === "string" ? value.includes(expected) : Array.isArray(value) ? value.some((x) => loose(x) === expected) : false)
+                : op === "gt"
+                  ? typeof value === "number" && value > num
+                  : typeof value === "number" && value < num;
+  const want = { true: "true", false: "false", exists: "present", equals: `= ${expected}`, not_equals: `≠ ${expected}`, contains: `containing ${expected}`, gt: `> ${expected}`, lt: `< ${expected}` }[op];
+  return { ok, message: ok ? `${path} is ${show(value)}` : `${path} is ${show(value)}, expected ${want}` };
+}
 
 async function probeHttp(m: Monitor): Promise<Result> {
   const started = Date.now();
@@ -102,9 +154,27 @@ async function probeHttp(m: Monitor): Promise<Result> {
       cache: "no-store",
     });
     let text = "";
-    if (m.keyword) text = await res.text();
+    if (m.keyword || m.jsonPath) text = await res.text();
     else await res.body?.cancel();
     const latency = Date.now() - started;
+    // A JSON check: the field decides (the status code doesn't, as long as the answer is JSON: a bot
+    // that isn't ready answers 503 and can still report its database).
+    if (m.jsonPath) {
+      const missing = (message: string): Result => ({ status: m.jsonMissing === "down" ? "down" : "unknown", latency, code: res.status, message });
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return missing(`The answer isn't JSON (${res.status})`);
+      }
+      const value = jsonAt(data, m.jsonPath);
+      if (value === undefined) return missing(`${m.jsonPath} isn't in the answer`);
+      if (value === null && m.jsonOp !== "exists") return missing(`${m.jsonPath} is null`);
+      const rule = jsonRule(value, m.jsonOp, m.jsonValue, m.jsonPath);
+      if (!rule.ok) return { status: "down", latency, code: res.status, message: rule.message };
+      const slow = m.degradedMs > 0 && latency > m.degradedMs;
+      return { status: slow ? "degraded" : "up", latency, code: res.status, message: slow ? `${rule.message} · slow: ${latency} ms` : rule.message };
+    }
     if (!statusMatches(res.status, m.expectedStatus)) {
       return { status: "down", latency, code: res.status, message: `Answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""}, expected ${m.expectedStatus}` };
     }
@@ -119,7 +189,8 @@ async function probeHttp(m: Monitor): Promise<Result> {
     const slow = m.degradedMs > 0 && latency > m.degradedMs;
     return { status: slow ? "degraded" : "up", latency, code: res.status, message: slow ? `Slow: ${latency} ms (over ${m.degradedMs} ms)` : `${res.status} OK` };
   } catch (e) {
-    return { status: "down", latency: null, code: null, message: describe(e) };
+    // No answer: a JSON check can't tell either.
+    return { status: m.jsonPath && m.jsonMissing !== "down" ? "unknown" : "down", latency: null, code: null, message: describe(e) };
   }
 }
 
@@ -178,6 +249,25 @@ const day = (t: number) => new Date(t).toISOString().slice(0, 10);
  */
 export async function record(m: Monitor, r: Result, now = Date.now()): Promise<Change | null> {
   const prev = m.status;
+  // Unknown: logged, shown as "unknown" (pending), counted in neither uptime nor downtime. An open
+  // outage stays open: only a definite answer ends it.
+  if (r.status === "unknown") {
+    await batch([
+      ["INSERT INTO checks (monitor_id, at, status, latency, code, message) VALUES (?, ?, 'unknown', ?, ?, ?)", m.id, now, r.latency, r.code, r.message],
+      [
+        "UPDATE monitors SET status = 'pending', fail_count = 0, last_checked_at = ?, next_check_at = ?, last_latency = ?, last_message = ?, status_since = ? WHERE id = ?",
+        now,
+        now + m.intervalS * 1000,
+        r.latency,
+        r.message,
+        prev === "pending" ? (m.statusSince ?? now) : now,
+        m.id,
+      ],
+    ]);
+    return null;
+  }
+  // Coming out of "unknown": is an outage still open from before?
+  const open = prev === "pending" ? await first<{ startedAt: number }>("SELECT started_at FROM incidents WHERE monitor_id = ? AND resolved_at IS NULL", m.id) : undefined;
   const failCount = r.status === "down" ? m.failCount + 1 : 0;
   const confirmations = m.type === "heartbeat" ? 1 : Math.max(1, m.retries);
   const next: Status = r.status !== "down" ? r.status : failCount >= confirmations ? "down" : prev;
@@ -209,12 +299,18 @@ export async function record(m: Monitor, r: Result, now = Date.now()): Promise<C
       m.id,
     ],
   ];
-  if (changed && next === "down") statements.push(["INSERT INTO incidents (monitor_id, started_at, cause) VALUES (?, ?, ?)", m.id, now, r.message]);
-  if (changed && prev === "down") statements.push(["UPDATE incidents SET resolved_at = ? WHERE monitor_id = ? AND resolved_at IS NULL", now, m.id]);
+  // One open incident at most: going down again after "unknown" continues the same outage.
+  if (changed && next === "down" && !open) statements.push(["INSERT INTO incidents (monitor_id, started_at, cause) VALUES (?, ?, ?)", m.id, now, r.message]);
+  if (changed && next !== "down") statements.push(["UPDATE incidents SET resolved_at = ? WHERE monitor_id = ? AND resolved_at IS NULL", now, m.id]);
   await batch(statements);
 
-  // A new monitor coming up isn't news.
-  if (!changed || (prev === "pending" && next === "up")) return null;
+  if (!changed) return null;
+  if (prev === "pending") {
+    // Back after "unknown" from an outage: that's a recovery. Down again: already alerted.
+    if (open) return next === "down" ? null : { monitor: { ...m, status: next }, from: "down", to: next as Outcome, result: r, at: now, downSince: open.startedAt };
+    // A new monitor coming up isn't news.
+    if (next === "up") return null;
+  }
   return { monitor: { ...m, status: next }, from: prev, to: next as Outcome, result: r, at: now, downSince: prev === "down" ? m.statusSince : null };
 }
 

@@ -98,7 +98,7 @@ const COLORS: Record<string, string> = {
   none: "#8b8d98",
   unknown: "#8b8d98",
 };
-const WORDS: Record<string, string> = { up: "up", degraded: "degraded", down: "down", maintenance: "maintenance", paused: "paused", pending: "pending", none: "no data", unknown: "unknown" };
+const WORDS: Record<string, string> = { up: "up", degraded: "degraded", down: "down", maintenance: "maintenance", paused: "paused", pending: "unknown", none: "no data", unknown: "unknown" };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
@@ -169,7 +169,7 @@ const EMBED_TEXT = {
     maintenance: "Maintenance en cours",
     none: "Aucun moniteur",
     open: "Voir la page de statut",
-    status: { up: "en ligne", degraded: "dégradé", down: "hors service", maintenance: "maintenance", paused: "en pause", pending: "en attente", none: "—", unknown: "—" },
+    status: { up: "en ligne", degraded: "dégradé", down: "hors service", maintenance: "maintenance", paused: "en pause", pending: "inconnu", none: "—", unknown: "—" },
   },
 };
 

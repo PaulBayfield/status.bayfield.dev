@@ -90,6 +90,10 @@ export function monitorView(
     domainName: m.domainName,
     expiryWarnDays: m.expiryWarnDays,
     expiries: (opts.expiries ?? []).map(expiryView),
+    jsonPath: m.jsonPath,
+    jsonOp: m.jsonOp,
+    jsonValue: m.jsonValue,
+    jsonMissing: m.jsonMissing,
     paused: !!m.paused,
     // Paused wins; then a running maintenance window.
     status: m.paused ? ("paused" as const) : opts.maintenance ? ("maintenance" as const) : m.status,

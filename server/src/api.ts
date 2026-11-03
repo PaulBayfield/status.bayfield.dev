@@ -6,7 +6,7 @@ import { config } from "./config.ts";
 import { randomToken, sha256 } from "./crypto.ts";
 import { HttpError, bad, body, id, int, rateLimit, str } from "./http.ts";
 import { requireAdmin, requireCollaborator, requireUser, signOutEverywhere, type AppEnv } from "./auth.ts";
-import { checkNow, parseHostPort, type Monitor, type MonitorType } from "./checks.ts";
+import { JSON_OPS, checkNow, parseHostPort, type JsonOp, type Monitor, type MonitorType } from "./checks.ts";
 import { EVENTS, WEBHOOK_KINDS, notify, request, send, testSubject, type Webhook } from "./notify.ts";
 import { DETAILS, LANGUAGES, MESSAGE_EVENTS, PLACEHOLDERS, TemplateError, defaultTexts, parseTemplate, storedTemplate, type MessageEvent } from "./messages.ts";
 import { daysByMonitor, expiryView, latencySeries, monitorView, uptime } from "./views.ts";
@@ -140,12 +140,24 @@ async function parseMonitor(b: Record<string, unknown>, old?: Monitor) {
     intervalS: int(pick("intervalS"), 60, type === "heartbeat" ? 7 * 86400 : 86400, 60),
     retries: int(pick("retries"), 1, 10, 2),
     degradedMs: int(pick("degradedMs"), 0, 60_000, 0),
+    ...jsonCheck(type, pick),
     // Certificates need an https:// target; domains a host name (not an IP or a heartbeat).
     certCheck: type === "http" && /^https:/i.test(target) && !!pick("certCheck"),
     domainCheck: type !== "heartbeat" && !!pick("domainCheck"),
     domainName: domainName(pick("domainName")),
     expiryWarnDays: int(pick("expiryWarnDays"), 1, 90, 14),
   };
+}
+
+/** The JSON check of an HTTP monitor: a path, an operator, a value, and what a missing field means. */
+function jsonCheck(type: MonitorType, pick: <K extends keyof Monitor>(k: K) => unknown) {
+  const path = type === "http" ? str(pick("jsonPath"), 200) : "";
+  if (path && !/^[\w$-]+(\[\d+\]|\.[\w$-]+)*$/.test(path)) throw bad("The JSON field looks like extra.database or shards[0].closed");
+  const op = JSON_OPS.includes(pick("jsonOp") as JsonOp) ? (pick("jsonOp") as JsonOp) : "true";
+  const value = str(pick("jsonValue"), 200);
+  if ((op === "gt" || op === "lt") && path && !Number.isFinite(Number(value))) throw bad("Compare with a number");
+  if ((op === "equals" || op === "not_equals" || op === "contains") && path && !value) throw bad("Enter the value to compare with");
+  return { jsonPath: path, jsonOp: op, jsonValue: value, jsonMissing: pick("jsonMissing") === "down" ? ("down" as const) : ("unknown" as const) };
 }
 
 function domainName(v: unknown): string {
@@ -182,7 +194,7 @@ api.get("/monitors/:id", async (c) => {
   const days = (await daysByMonitor([m.id])).get(m.id) ?? [];
   const since = Date.now() - DAY;
   const day = await first<{ total: number; ok: number; avg: number | null; min: number | null; max: number | null }>(
-    "SELECT count(*) AS total, sum(status <> 'down') AS ok, avg(latency) AS avg, min(latency) AS min, max(latency) AS max FROM checks WHERE monitor_id = ? AND at >= ?",
+    "SELECT sum(status <> 'unknown') AS total, sum(status IN ('up', 'degraded')) AS ok, avg(latency) AS avg, min(latency) AS min, max(latency) AS max FROM checks WHERE monitor_id = ? AND at >= ?",
     m.id,
     since,
   );
@@ -231,8 +243,8 @@ api.post("/monitors", requireCollaborator, async (c) => {
   const now = Date.now();
   const { id: mid } = await run(
     `INSERT INTO monitors (project_id, name, type, target, method, expected_status, keyword, headers, follow_redirects, timeout_ms, interval_s, retries, degraded_ms, push_token,
-       cert_check, domain_check, domain_name, expiry_warn_days, next_check_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cert_check, domain_check, domain_name, expiry_warn_days, json_path, json_op, json_value, json_missing, next_check_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.projectId,
     v.name,
     v.type,
@@ -251,6 +263,10 @@ api.post("/monitors", requireCollaborator, async (c) => {
     v.domainCheck,
     v.domainName,
     v.expiryWarnDays,
+    v.jsonPath,
+    v.jsonOp,
+    v.jsonValue,
+    v.jsonMissing,
     // Heartbeats wait for their first ping; the others are checked straight away.
     v.type === "heartbeat" ? now + v.intervalS * 1000 : 0,
     now,
@@ -266,11 +282,12 @@ api.patch("/monitors/:id", requireCollaborator, async (c) => {
   const old = await getMonitor(id(c));
   const v = await parseMonitor(await body(c), old);
   // Pointing it somewhere else starts over: the old state says nothing about the new target.
-  const retarget = v.type !== old.type || v.target !== old.target;
+  const retarget = v.type !== old.type || v.target !== old.target || v.jsonPath !== old.jsonPath || v.jsonOp !== old.jsonOp || v.jsonValue !== old.jsonValue;
   const pushToken = v.type === "heartbeat" ? (old.pushToken ?? randomToken(18)) : null;
   await run(
     `UPDATE monitors SET project_id = ?, name = ?, type = ?, target = ?, method = ?, expected_status = ?, keyword = ?, headers = ?, follow_redirects = ?,
-       timeout_ms = ?, interval_s = ?, retries = ?, degraded_ms = ?, push_token = ?, cert_check = ?, domain_check = ?, domain_name = ?, expiry_warn_days = ?, updated_at = ?,
+       timeout_ms = ?, interval_s = ?, retries = ?, degraded_ms = ?, push_token = ?, cert_check = ?, domain_check = ?, domain_name = ?, expiry_warn_days = ?,
+       json_path = ?, json_op = ?, json_value = ?, json_missing = ?, updated_at = ?,
        status = CASE WHEN ? THEN 'pending' ELSE status END, fail_count = CASE WHEN ? THEN 0 ELSE fail_count END,
        next_check_at = CASE WHEN ? THEN 0 ELSE min(next_check_at, ?) END
      WHERE id = ?`,
@@ -292,6 +309,10 @@ api.patch("/monitors/:id", requireCollaborator, async (c) => {
     v.domainCheck,
     v.domainName,
     v.expiryWarnDays,
+    v.jsonPath,
+    v.jsonOp,
+    v.jsonValue,
+    v.jsonMissing,
     Date.now(),
     retarget,
     retarget,
@@ -558,6 +579,10 @@ api.get("/export", async (c) => {
       domainCheck: !!m.domainCheck,
       domainName: m.domainName,
       expiryWarnDays: m.expiryWarnDays,
+      jsonPath: m.jsonPath,
+      jsonOp: m.jsonOp,
+      jsonValue: m.jsonValue,
+      jsonMissing: m.jsonMissing,
       paused: !!m.paused,
     })),
     webhooks: webhooks.map((w) => ({ name: w.name, kind: w.kind, events: w.events, projects: w.projects, enabled: !!w.enabled, template: storedTemplate(w.template) })),

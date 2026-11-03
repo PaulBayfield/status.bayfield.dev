@@ -113,6 +113,11 @@ export interface Monitor {
   domainName: string;
   expiryWarnDays: number;
   expiries: ExpiryInfo[];
+  /** HTTP monitors: the status comes from a field of the JSON answer. Empty path: none. */
+  jsonPath: string;
+  jsonOp: JsonOp;
+  jsonValue: string;
+  jsonMissing: "unknown" | "down";
   paused: boolean;
   status: Status;
   lastCheckedAt: string | null;
@@ -139,6 +144,11 @@ export interface MonitorDetails extends Monitor {
   };
   openIncident: { id: number; startedAt: string; cause: string } | null;
 }
+
+export const JSON_OPS = ["true", "false", "equals", "not_equals", "contains", "gt", "lt", "exists"] as const;
+export type JsonOp = (typeof JSON_OPS)[number];
+/** The operators that compare with a value. */
+export const JSON_OPS_WITH_VALUE: JsonOp[] = ["equals", "not_equals", "contains", "gt", "lt"];
 
 export interface ExpiryInfo {
   kind: "certificate" | "domain";
@@ -198,7 +208,8 @@ export interface Series {
 
 export interface Check {
   at: string;
-  status: "up" | "degraded" | "down";
+  /** unknown: a JSON check that couldn't read its field. */
+  status: "up" | "degraded" | "down" | "unknown";
   latency: number | null;
   code: number | null;
   message: string;

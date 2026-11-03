@@ -93,6 +93,15 @@ export function MonitorPage({ id }: { id: number }) {
             )}
             <span>·</span>
             <span>{t("everyInterval", { interval: interval(m.intervalS, t) })}</span>
+            {m.type === "http" && m.jsonPath && (
+              <>
+                <span>·</span>
+                <span title={t("jsonCheck")}>
+                  <code className="json-inline">{m.jsonPath}</code> {t(`jsonOp_${m.jsonOp}`)}
+                  {["equals", "not_equals", "contains", "gt", "lt"].includes(m.jsonOp) && <code className="json-inline">{m.jsonValue}</code>}
+                </span>
+              </>
+            )}
             {project && (
               <>
                 <span>·</span>

@@ -74,6 +74,44 @@
   --s: var(--maintenance);
   --s-text: var(--maintenance-text);
 }
+/* A check that couldn't tell (a JSON field that can't be read): like "unknown" monitors. */
+.s-unknown {
+  --s: var(--paused);
+  --s-text: var(--text-muted);
+}
+.json-rule {
+  display: flex;
+  gap: 8px;
+}
+.json-rule select {
+  flex: none;
+}
+.json-rule .text-field {
+  flex: 1;
+  min-width: 0;
+}
+.inline-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.inline-select select {
+  flex: 1;
+  min-width: 0;
+}
+.form-field .text-field.mono-field,
+.json-inline {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 12px;
+}
+.json-inline {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
 
 .status-pill {
   display: inline-flex;
