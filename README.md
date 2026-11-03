@@ -61,7 +61,7 @@ Key features:
 - **Monitor page:** uptime over 24 h, 7, 30 and 90 days, a response time chart (24 h / 7 / 30 days: the mean as a line and the min–max of each period as a band, both toggleable, min / mean / max on hover, failures marked along the baseline), the 90-day bars, its incidents and recent checks. Check now, pause, edit, delete
 - **SSL certificates and domains:** HTTP monitors can watch their certificate (read from the server's TLS handshake, or from the Certificate Transparency logs when the host is behind Cloudflare) and their domain's registration (RDAP). The monitor page shows until when, the issuer or registrar and the days left; the overview flags the ones close to expiry; a notification goes out when one gets within N days (14 by default), 3 days before, and when it expires
 - **Incidents:** opened when a monitor goes down, closed when it's back, with the cause and how long it lasted
-- **Webhook notifications** to Discord, Slack, ntfy or any URL (signed JSON), on down / back up / degraded / certificate or domain expiry, for all monitors or chosen projects, with a "Send a test" button
+- **Webhook notifications** to Discord, Slack, ntfy or any URL (signed JSON), on down / back up / degraded / certificate or domain expiry / announcements / maintenance, for all monitors or chosen projects, with a "Send a test" button
 - **Status pages**, like Uptime Kuma's: as many as you like, each at its own address (`/status/croustillant`) with a title, a description, an optional logo (a link to an image hosted elsewhere) and named groups of monitors in the order you choose (or one group per project in a click). One is the default page, also shown at `/status` and at `/` to visitors. Visitors see names, status, 90-day bars and the last week's incidents, never URLs or error details. Each page chooses what it shows: summary tiles, uptime bars, incidents, and response time charts (hidden, a button on each monitor, or open) Plus shields-style badges at `/api/public/badge/<id>` for monitors shown on a page
 - **Announcements:** incident posts you write (title, impact, affected monitors), published to the status pages you pick, with a timeline of updates: investigating → identified → monitoring → resolved. Open ones head the page (a major one turns it red, a minor one amber); resolved ones stay listed for 14 days
 - **Maintenance windows:** planned work over some monitors. During the window they aren't checked (no alerts, no downtime counted) and show as "maintenance"; status pages announce it up to 30 days ahead. End one early with "End now"
@@ -178,7 +178,11 @@ curl "http://localhost:8820/__scheduled?cron=*+*+*+*+*"
 
 ## 🔔 • Webhooks
 
-Add them on the **Notifications** page. Each one picks its events (down, back up, degraded) and its projects (or all monitors).
+Add them on the **Notifications** page. Each one picks its events (down, back up, degraded, certificate or domain expiry, announcements, maintenance) and its projects (or all monitors).
+
+- **Announcements** notify when one is published and on each update (untick "Notify webhooks" for a quiet correction).
+- **Maintenance** windows notify when they're scheduled (saved ahead of time), when they start, and when they're over; each window can turn its notifications off.
+- A webhook limited to some projects gets the announcements and windows that name one of their monitors; those that name no monitor go to every webhook with the event.
 
 | Service | URL | Notes |
 |---|---|---|
@@ -191,7 +195,7 @@ Add them on the **Notifications** page. Each one picks its events (down, back up
 
 Each webhook's **Message** button opens an editor with a live preview (a Discord look-alike for Discord, the raw payload for the others) and a **Send a test** for each event. Everything is per webhook:
 
-- **Texts:** a title and a text for each event (down, back up, back to normal, degraded, expiring), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{year}`, `{link}`, `{page}`, and for expiry warnings `{what}`, `{name}`, `{expires}`, `{days}`, `{expiry}`, `{issuer}`. Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
+- **Texts:** a title and a text for each event (down, back up, back to normal, degraded, expiring, announcement, maintenance), with placeholders: `{monitor}`, `{project}`, `{target}`, `{status}`, `{previous}`, `{cause}`, `{code}`, `{latency}`, `{duration}`, `{time}`, `{year}`, `{link}`, `{page}`, for expiry warnings `{what}`, `{name}`, `{expires}`, `{days}`, `{expiry}`, `{issuer}`, and for announcements and maintenance `{title}`, `{update}`, `{impact}`, `{phase}`, `{start}`, `{end}`, `{affects}` (`{status}` is then the announcement's status). Empty fields use the defaults of the chosen language (English or French). Discord markdown works in Discord messages.
 - **Details** listed under the text (target, cause, response time, downtime, project, time) and **buttons** (the monitor in Status, and a status page: the monitor's own, or one you pick), with their labels.
 - **Discord:** a mention per event (`<@&role id>`, `<@user id>`, `@here`, `@everyone`; nothing else in a message can ping), the webhook's name and avatar, a thumbnail, the footer, the status emoji and the three colours.
 
@@ -215,6 +219,8 @@ The JSON webhook POSTs (`title`, `message`, `details` and `buttons` come from th
   "buttons": [{ "label": "Open in Status", "url": "https://status.bayfield.dev/m/3" }]
 }
 ```
+
+Announcements and maintenance POST `{ "event": "post" | "maintenance", "phase": "new" | "update" | "resolved" | "scheduled" | "started" | "ended", "title", "message", "url", "at", "post" | "maintenance": {…}, "monitors": [{ "id", "name", "projectId" }], "details", "buttons" }`.
 
 With a signing secret, each request carries `X-Status-Signature: sha256=<hex HMAC-SHA256 of the raw body>`, and always `X-Status-Event`.
 
