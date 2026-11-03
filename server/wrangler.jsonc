@@ -31,7 +31,10 @@
   },
 
   // Serve on status.bayfield.dev (the zone must be on this Cloudflare account).
-  "routes": [{ "pattern": "status.bayfield.dev", "custom_domain": true }],
+  "routes": [
+    { "pattern": "status.bayfield.dev", "custom_domain": true },
+    { "pattern": "status.croustillant.menu", "custom_domain": true }
+  ],
 
   "observability": { "enabled": true },
 
