@@ -67,7 +67,8 @@ app.use("*", async (c, next) => {
       styleSrc: ["'self'", "'unsafe-inline'"],
       // Status page logos are links to images hosted elsewhere.
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
+      // prefs.bayfield.dev: the preferences shared with the other apps.
+      connectSrc: ["'self'", "https://prefs.bayfield.dev"],
       frameAncestors: embed ? ["*"] : ["'none'"],
       formAction: ["'self'"],
       baseUri: ["'self'"],

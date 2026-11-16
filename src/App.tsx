@@ -21,6 +21,7 @@ import { PostPage, PostsPage } from "./components/PostsPage";
 import { MaintenancePage } from "./components/MaintenancePage";
 import { SidePanel } from "./components/SidePanel";
 import { statusKey } from "./components/status";
+import { usePrefsSync } from "./lib/prefs";
 
 export default function App() {
   return (
@@ -85,6 +86,8 @@ function Root() {
 
 function Shell({ me, setMe, router, onSignedOut }: { me: Me; setMe: (me: Me) => void; router: ReturnType<typeof useRouter>; onSignedOut: () => void }) {
   const { settings, update, t } = useSettings();
+  // Shared with the other bayfield.dev apps (prefs.bayfield.dev).
+  usePrefsSync({ theme: settings.theme, language: settings.language }, update);
   const toast = useToast();
   const mobile = useMediaQuery(MOBILE_QUERY);
   const [drawer, setDrawer] = useState(false);
