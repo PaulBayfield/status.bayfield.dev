@@ -22,7 +22,6 @@ export function Toolbar({ title, loading }: { title: ReactNode; loading?: boolea
       <h1 className="toolbar-title">{title}</h1>
       {loading && <span className="spinner" aria-label={t("loading")} />}
       <div className="toolbar-spacer" />
-      <AccountMenu />
       {canContribute(me) && (
         <button
           className="text-button"
@@ -34,6 +33,8 @@ export function Toolbar({ title, loading }: { title: ReactNode; loading?: boolea
           <span className="hide-mobile">{webhooks ? t("addWebhook") : t("addMonitor")}</span>
         </button>
       )}
+      {/* The profile last, right before the side panel toggle (as in every bayfield.dev app). */}
+      <AccountMenu />
       <button
         className={`icon-button panel-toggle${panelVisible ? " active" : ""}`}
         title={`${t("togglePanel")} (.)`}
