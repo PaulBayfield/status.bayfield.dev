@@ -4,9 +4,9 @@ import { useApp } from "../../lib/app";
 import { invalidate, useApi } from "../../lib/hooks";
 import { useSettings, type Settings, type Theme } from "../../lib/settings";
 import type { StringKey } from "../../lib/i18n";
-import { Download } from "../icons";
+import { Download, ExternalLink } from "../icons";
 import { PageHeader, Row, Switch, useSaveProfile } from "./common";
-import { connectPrefs, disconnectPrefs, usePrefsStatus } from "../../lib/prefs";
+import { connectPrefs, disconnectPrefs, usePrefsStatus, activeCustomTheme, BASE_COLORS, PREFS_URL } from "../../lib/prefs";
 
 // --- Profile ---
 
@@ -80,7 +80,7 @@ export function PreferencesPage() {
         <h3>{t("appearance")}</h3>
         <div className="theme-picker">
           {THEMES.map(({ id, label }) => (
-            <button key={id} className={`theme-card${settings.theme === id ? " active" : ""}`} onClick={() => update({ theme: id })}>
+            <button key={id} className={`theme-card${!activeCustomTheme(settings) && settings.theme === id ? " active" : ""}`} onClick={() => update({ theme: id, customTheme: "" })}>
               <span className={`theme-preview ${id}`}>
                 <span />
                 <span />
@@ -89,7 +89,32 @@ export function PreferencesPage() {
               {t(label)}
             </button>
           ))}
+          {settings.customThemes.map((theme) => {
+            const c = { ...BASE_COLORS[theme.base], ...theme.colors };
+            return (
+              <button
+                key={theme.id}
+                className={`theme-card${activeCustomTheme(settings)?.id === theme.id ? " active" : ""}`}
+                title={theme.name}
+                onClick={() => update({ theme: theme.base, customTheme: theme.id })}
+              >
+                <span className="theme-preview" style={{ background: c.bg, borderColor: c["border-strong"] }}>
+                  <span style={{ background: c["bg-sidebar"] }} />
+                  <span style={{ background: c.primary }} />
+                  <span style={{ background: c.accent }} />
+                </span>
+                <span className="theme-card-name">{theme.name}</span>
+              </button>
+            );
+          })}
         </div>
+        <p className="theme-manage">
+          {t("manageThemesHint")}{" "}
+          <a className="theme-manage-link" href={PREFS_URL} target="_blank" rel="noopener">
+            {t("manageThemes")}
+            <ExternalLink size={13} />
+          </a>
+        </p>
       </section>
       <section className="settings-rows">
         <Row label={t("languageLabel")}>
