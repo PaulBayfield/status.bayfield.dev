@@ -1,7 +1,7 @@
 {
   "name": "status-server",
   "private": true,
-  "version": "0.9.1",
+  "version": "0.9.2",
   "type": "module",
   "description": "Status API, checks and static host, as a Cloudflare Worker",
   "engines": {
